@@ -1,0 +1,9 @@
+{
+  "name": "dsh-plugin-mcp-json",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "自动读取工作目录（或指定 cwd）下的 .mcp.json，并挂载其中的 MCP server",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

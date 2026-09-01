@@ -1,0 +1,16 @@
+{
+  "name": "dsh-plugins-loulan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "多插件开发项目：cheer（每次 AI 对话输出「加油」）+ mcp-json（自动应用 .mcp.json 引入 MCP）",
+  "scripts": {
+    "link:dsh": "bash scripts/link-dsh.sh",
+    "dev": "bash scripts/dev.sh",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3"
+  }
+}
