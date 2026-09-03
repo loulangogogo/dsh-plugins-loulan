@@ -13,7 +13,7 @@ set -euo pipefail
 #   或  DSH_HARNESS=/path/to/deepseek-harness bash scripts/link-dsh.sh
 
 # harness 路径：优先取 DSH_HARNESS 环境变量，其次取第 1 个位置参数。
-HARNESS="${DSH_HARNESS:-${1:-}}"
+HARNESS="${DSH_HARNESS:-$HOME/.dsh/deepseek-harness}"
 # 两者都未提供时打印用法并退出。
 if [[ -z "$HARNESS" ]]; then
   echo "用法: $0 <path-to-deepseek-harness>" >&2
