@@ -5,4 +5,4 @@
 
 - insert:
     - id: hello
-      name: /Users/loulan/Documents/Program/TS/dsh-plugins-loulan/packages/hello/src/index.ts
+      name: ./packages/hello/src/index.ts
