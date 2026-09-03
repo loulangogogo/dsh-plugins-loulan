@@ -1,10 +1,10 @@
 /**
- * @fileoverview loulan-mcp 插件 —— 自动应用 .mcp.json 引入 MCP server。
+ * @fileoverview dsh-loulan-mcp 插件 —— 自动应用 .mcp.json 引入 MCP server。
  *
  * 按生命周期分离加载：
- *   - 启动时：从 .dsh 根目录（config.cwd，默认 $DSH_HOME 或 ~/.dsh）向上查找
+ *   - 启动时：从 .dsh 根目录（config.cwd，默认 $DSH_HOME 或 ~/.dsh）读取
  *     .mcp.json，挂载到全局 ctx（所有 agent 共享）；
- *   - agent 创建时：从该 agent 的 session.header.cwd（工作区根目录）向上查找
+ *   - agent 创建时：从该 agent 的 session.header.cwd（工作区根目录）读取
  *     .mcp.json，挂载到 agent.ctx（只对该工作区的 agent 可见，销毁时自动卸载）。
  *
  * 挂载规则（见 mapServer）：
@@ -25,7 +25,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 /** 插件名，须与 cordis.yml 中的 id 对应。 */
-export const name = 'loulan-mcp'
+export const name = 'dsh-loulan-mcp'
 
 /**
  * 插件配置。
@@ -92,28 +92,16 @@ function asStringRecord(value: unknown): Record<string, string> {
 }
 
 /**
- * 从 start 目录开始向上逐级查找最近的 .mcp.json。
+ * 查找 start 目录下的 .mcp.json。
  *
- * 典型场景：从工作区根目录或 .dsh 根目录向上，找到项目级/全局的 .mcp.json。
+ * 只检查起始目录本身，不向上递归父目录。
  *
  * @param start - 起始目录（绝对或相对路径均可，内部会 resolve）
- * @returns 找到的 .mcp.json 绝对路径；向上直到文件系统根仍无则返回 undefined
+ * @returns start 目录下 .mcp.json 的绝对路径；不存在则返回 undefined
  */
 function findMcpJson(start: string): string | undefined {
-  let dir = resolve(start)
-  const candidate = join(dir, '.mcp.json')
-  if (existsSync(candidate)) return candidate
-  else return undefined
-
-  // 无限循环逐级向上，直到命中文件或到达根目录（parent === dir）。
-  // for (;;) {
-  //   const candidate = join(dir, '.mcp.json')
-  //   if (existsSync(candidate)) return candidate
-  //   const parent = dirname(dir)
-  //   // dirname 到达文件系统根后不再变化，据此终止循环。
-  //   if (parent === dir) return undefined
-  //   dir = parent
-  // }
+  const candidate = join(resolve(start), '.mcp.json')
+  return existsSync(candidate) ? candidate : undefined
 }
 
 /**
@@ -211,11 +199,11 @@ async function mountFile(ctx: Context, file: string): Promise<void> {
   try {
     doc = JSON.parse(await readFile(file, 'utf8'))
   } catch (error) {
-    console.error(`[loulan-mcp] 解析 ${file} 失败:`, error)
+    console.error(`[dsh-loulan-mcp] 解析 ${file} 失败:`, error)
     return
   }
 
-  console.log(`[loulan-mcp] 应用 ${file}`)
+  console.log(`[dsh-loulan-mcp] 应用 ${file}`)
   // 2. 提取 mcpServers（缺失或非对象时视为空）。
   const servers = isRecord(doc) && isRecord(doc.mcpServers) ? doc.mcpServers : {}
   // stdio 子进程的默认 cwd = 该 .mcp.json 所在目录。
@@ -226,16 +214,16 @@ async function mountFile(ctx: Context, file: string): Promise<void> {
   for (const [serverName, raw] of Object.entries(servers)) {
     const mapped = mapServer(serverName, raw, projectDir)
     if (!mapped.ok) {
-      console.warn(`[loulan-mcp] ${mapped.reason}`)
+      console.warn(`[dsh-loulan-mcp] ${mapped.reason}`)
       continue
     }
     try {
       // ctx.plugin 返回 fiber，异步完成 mcp-client 的连接与工具发现。
       const fiber = ctx.plugin(mcpClient, mapped.config)
       fibers.push(fiber)
-      console.log(`[loulan-mcp] 已挂载 MCP server "${serverName}"`)
+      console.log(`[dsh-loulan-mcp] 已挂载 MCP server "${serverName}"`)
     } catch (error) {
-      console.error(`[loulan-mcp] 挂载 "${serverName}" 失败:`, error)
+      console.error(`[dsh-loulan-mcp] 挂载 "${serverName}" 失败:`, error)
     }
   }
 
@@ -243,7 +231,7 @@ async function mountFile(ctx: Context, file: string): Promise<void> {
   const settled = await Promise.allSettled(fibers)
   for (const result of settled) {
     if (result.status === 'rejected') {
-      console.error('[loulan-mcp] MCP server 启动失败:', result.reason)
+      console.error('[dsh-loulan-mcp] MCP server 启动失败:', result.reason)
     }
   }
 }
@@ -266,14 +254,14 @@ export async function apply(ctx: Context, config: Config) {
   if (rootFile) {
     await mountFile(ctx, rootFile)
   } else {
-    console.log(`[loulan-mcp] 在 ${rootStart} 及其父目录未找到 .mcp.json，跳过全局 MCP 引入`)
+    console.log(`[dsh-loulan-mcp] 在 ${rootStart} 及其父目录未找到 .mcp.json，跳过全局 MCP 引入`)
   }
 
   // 2. agent 创建时：在该 agent 的 ctx 上挂载其工作区的 .mcp.json。
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
     // 调试日志：打印命中的工作区 cwd，便于观察动态加载是否触发。
-    console.log(`[loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
+    console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
     // session 无 cwd 时无法定位工作区，跳过。
     if (cwd === undefined) return
     const file = findMcpJson(cwd)

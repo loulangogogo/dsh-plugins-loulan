@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "多插件开发项目：loulan-mcp（自动应用 .mcp.json 引入 MCP）+ hello（注册 /hello 斜杠命令）",
+  "description": "多插件开发项目：dsh-loulan-mcp（自动应用 .mcp.json 引入 MCP）+ hello（注册 /hello 斜杠命令）",
   "scripts": {
     "link:dsh": "bash scripts/link-dsh.sh",
     "dev": "bash scripts/dev.sh",

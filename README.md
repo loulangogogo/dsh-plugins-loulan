@@ -4,7 +4,7 @@
 
 | 插件 | 目录 | 作用 |
 |---|---|---|
-| `loulan-mcp` | [packages/mcp](packages/mcp) | 自动读取项目下的 `.mcp.json`，把其中的 MCP server 挂载进 DSH |
+| `dsh-loulan-mcp` | [packages/mcp](packages/mcp) | 自动读取项目下的 `.mcp.json`，把其中的 MCP server 挂载进 DSH |
 | `hello` | [packages/hello](packages/hello) | 注册斜杠命令 `/hello`，在聊天界面输出「你好」 |
 
 ---
@@ -67,7 +67,7 @@ cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 
 ---
 
-## 插件 1：loulan-mcp
+## 插件 1：dsh-loulan-mcp
 
 按生命周期分离加载：
 
@@ -108,7 +108,7 @@ cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 ### 配置
 
 ```yaml
-- id: loulan-mcp
+- id: dsh-loulan-mcp
   name: /绝对/路径/packages/mcp/src/index.ts
   config:
     cwd: /path/to/.dsh           # .dsh 根目录（启动时全局加载），默认 $DSH_HOME / ~/.dsh；工作区随 agent 动态加载，无需配置
