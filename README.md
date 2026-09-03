@@ -4,8 +4,8 @@
 
 | 插件 | 目录 | 作用 |
 |---|---|---|
-| `cheer` | [packages/cheer](packages/cheer) | 每次 AI 对话（每个 agent turn）结束时输出一句鼓励语，默认「加油」 |
 | `mcp-json` | [packages/mcp-json](packages/mcp-json) | 自动读取项目下的 `.mcp.json`，把其中的 MCP server 挂载进 DSH |
+| `hello` | [packages/hello](packages/hello) | 注册斜杠命令 `/hello`，在聊天界面输出「你好」 |
 
 ---
 
@@ -22,8 +22,8 @@ dsh-plugins-loulan/
 │   ├── link-dsh.sh         # 软链 harness 的 @deepseek-ai/* 包
 │   └── dev.sh              # 一键以本 overlay 启动 DSH Web UI
 └── packages/
-    ├── cheer/              # 插件 1
-    └── mcp-json/           # 插件 2
+    ├── mcp-json/           # 插件 1
+    └── hello/              # 插件 2
 ```
 
 ## 插件是什么
@@ -63,40 +63,20 @@ pnpm dev
 cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 ```
 
-启动后打开 <http://127.0.0.1:3080>。终端会看到：
-
-```text
-[cheer] 已加载：每个 AI 对话结束将输出「加油」
-```
-
-每次 AI 完成一轮对话（turn）时，终端会打印：
-
-```text
-[cheer] 加油 (turn 1)
-[cheer] 加油 (turn 2)
-```
+启动后打开 <http://127.0.0.1:3080>。
 
 ---
 
-## 插件 1：cheer
+## 插件 1：mcp-json
 
-监听 agent-loop 的 `agent/turn-stopping` 事件（每个对话轮次即将关闭时触发一次），
-输出配置的鼓励语。
+按生命周期分离加载：
 
-- 纯观察插件，不注入服务、不改变行为。
-- 鼓励语可通过配置覆盖：
+- **启动时**：从 `.dsh` 根目录（`cwd`，默认 `$DSH_HOME` 或 `~/.dsh`）向上查找
+  `.mcp.json`，挂载到全局（所有 agent 共享）。
+- **agent 创建时**：从该 agent 的工作区（`session.header.cwd`）向上查找
+  `.mcp.json`，挂载到该 agent（只对该工作区的对话可见，agent 销毁自动卸载）。
 
-```yaml
-- id: cheer
-  name: /绝对/路径/packages/cheer/src/index.ts
-  config:
-    message: 冲鸭
-```
-
-## 插件 2：mcp-json
-
-从 `cwd`（可配置，默认 DSH 工作目录）向上查找最近的 `.mcp.json`，解析
-`mcpServers`，并为每个条目挂载一个 `@deepseek-ai/dsh-mcp-client` 实例：
+每个 `.mcp.json` 的 `mcpServers` 条目挂载为一个 `@deepseek-ai/dsh-mcp-client` 实例：
 
 | .mcp.json 条目 | 映射到 |
 |---|---|
@@ -131,13 +111,27 @@ cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 - id: mcp-json
   name: /绝对/路径/packages/mcp-json/src/index.ts
   config:
-    cwd: /path/to/your/project   # 查找 .mcp.json 的起始目录，默认 process.cwd()
+    cwd: /path/to/.dsh           # .dsh 根目录（启动时全局加载），默认 $DSH_HOME / ~/.dsh；工作区随 agent 动态加载，无需配置
+```
+
+## 插件 2：hello
+
+通过 `@deepseek-ai/dsh-commands` 的命令注册表注册全局斜杠命令 `/hello`。在聊天框
+输入 `/hello` 后，命令处理器返回 `{ kind: 'success', text: '你好' }`，由聊天界面直接
+渲染「你好」；不经过模型，也不改变对话行为。
+
+- 固定输出「你好」，无配置项、无参数解析。
+- `inject: ['commands']` 声明对命令注册表服务的依赖。
+
+```yaml
+- id: hello
+  name: /绝对/路径/packages/hello/src/index.ts
 ```
 
 ## 注意
 
 - `cordis.yml` 里的 `name` **必须是绝对路径**：loader 用 profile 目录（而非本
-  文件所在目录）解析模块。项目被移动后需同步更新两处绝对路径。
+  文件所在目录）解析模块。项目被移动后需同步更新其中各插件的绝对路径。
 - 插件源码使用可擦除的 TypeScript 语法（仅类型注解 / `interface` / `import type`），
   依赖 Node 原生类型擦除直接运行，无需构建步骤。
 - 本项目 `@deepseek-ai/*` 依赖来自 harness checkout 的软链，不属于 npm registry；

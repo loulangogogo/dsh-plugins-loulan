@@ -42,6 +42,7 @@ declare -a PACKAGES=(
   "dsh-user-approval:packages/interaction/user-approval"
   "dsh-code-runtime:packages/code-runtime/code-runtime"
   "dsh-mcp-client:packages/mcp/mcp-client"
+  "dsh-commands:packages/interaction/commands"
 )
 
 for entry in "${PACKAGES[@]}"; do

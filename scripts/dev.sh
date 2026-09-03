@@ -14,4 +14,4 @@ if [[ ! -d "$HARNESS" ]]; then
 fi
 
 cd "$HARNESS"
-exec pnpm dsh web --patch "$ROOT/cordis.yml" "$@"
+exec pnpm dsh web  --patch "$ROOT/cordis.yml" "$@" --port 13080

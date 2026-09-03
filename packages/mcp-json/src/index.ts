@@ -1,8 +1,12 @@
 /**
- * 插件 2：mcp-json —— 自动应用项目下的 .mcp.json 引入 MCP server。
+ * 插件：mcp-json —— 自动应用 .mcp.json 引入 MCP server。
  *
- * 从 cwd（可配置）向上查找最近的 .mcp.json，解析其中的 mcpServers，并逐个
- * 挂载 @deepseek-ai/dsh-mcp-client 实例：
+ * 按生命周期分离加载：
+ *   - 启动时：从 .dsh 根目录（config.cwd，默认 $DSH_HOME 或 ~/.dsh）向上查找
+ *     .mcp.json，挂载到全局 ctx（所有 agent 共享）；
+ *   - agent 创建时：从该 agent 的 session.header.cwd（工作区根目录）向上查找
+ *     .mcp.json，挂载到 agent.ctx（只对该工作区的 agent 可见，销毁时自动卸载）。
+ * 挂载规则：
  *   - 有 command 的条目 → stdio 传输；
  *   - 有 url（或 type 为 http/sse/streamable-http）的条目 → streamable-http 传输。
  * 工具以 mcp__<serverName>__<tool> 的形式暴露给模型。
@@ -12,14 +16,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client'
 import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client'
+// 仅引入 dsh-agent 的事件类型声明（agent/created）。
+import type {} from '@deepseek-ai/dsh-agent'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 export const name = 'mcp-json'
 
 export interface Config {
-  /** 查找 .mcp.json 的起始目录；默认 process.cwd()（即 DSH 的工作目录）。 */
+  /** .dsh 根目录（启动时全局加载 .mcp.json 的起点）；默认 $DSH_HOME 或 ~/.dsh。 */
   cwd: string
 }
 
@@ -61,6 +68,11 @@ function findMcpJson(start: string): string | undefined {
     if (parent === dir) return undefined
     dir = parent
   }
+}
+
+/** 确定 DSH home 目录（$DSH_HOME，缺省为 ~/.dsh）。 */
+function dshHome(): string {
+  return process.env.DSH_HOME || join(homedir(), '.dsh')
 }
 
 type Mapped =
@@ -112,14 +124,12 @@ function mapServer(serverName: string, raw: unknown, projectDir: string): Mapped
   return { ok: false, reason: `既没有 command（stdio）也没有 url（http），已跳过: "${serverName}"` }
 }
 
-export async function apply(ctx: Context, config: Config) {
-  const startDir = config.cwd || process.cwd()
-  const file = findMcpJson(startDir)
-  if (!file) {
-    console.log(`[mcp-json] 在 ${startDir} 及其父目录未找到 .mcp.json，跳过 MCP 引入`)
-    return
-  }
-
+/**
+ * 把某个 .mcp.json 文件的 mcpServers 挂载到指定 ctx。
+ * @param ctx - 挂载目标：全局 ctx（启动时）或 agent.ctx（工作区，agent 局部）。
+ * @param file - .mcp.json 文件路径。
+ */
+async function mountFile(ctx: Context, file: string): Promise<void> {
   let doc: unknown
   try {
     doc = JSON.parse(await readFile(file, 'utf8'))
@@ -154,4 +164,28 @@ export async function apply(ctx: Context, config: Config) {
       console.error('[mcp-json] MCP server 启动失败:', result.reason)
     }
   }
+}
+
+export async function apply(ctx: Context, config: Config) {
+  // 起点：.dsh 根目录（启动时全局加载）。
+  const rootStart = config.cwd || dshHome()
+  const rootFile = findMcpJson(rootStart)
+
+  // 1. 启动时：在全局 ctx 上挂载 .dsh 根目录的 .mcp.json。
+  if (rootFile) {
+    await mountFile(ctx, rootFile)
+  } else {
+    console.log(`[mcp-json] 在 ${rootStart} 及其父目录未找到 .mcp.json，跳过全局 MCP 引入`)
+  }
+
+  // 2. agent 创建时：在该 agent 的 ctx 上挂载其工作区的 .mcp.json。
+  ctx.on('agent/created', ({ agent }) => {
+    const cwd = agent.session.header.cwd
+    console.log(`[mcp-json] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
+    if (cwd === undefined) return
+    const file = findMcpJson(cwd)
+    // 与全局相同则跳过（避免重复挂载）。
+    if (file === undefined || file === rootFile) return
+    void mountFile(agent.ctx, file)
+  })
 }

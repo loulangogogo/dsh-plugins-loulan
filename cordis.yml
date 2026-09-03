@@ -4,8 +4,8 @@
 # 去解析模块。若项目被移动到其它位置，请同步更新下面两处绝对路径。
 
 - insert:
-    - id: cheer
-      name: /Users/loulan/Documents/loulan/FRONT/dsh-plugins-loulan/packages/cheer/src/index.ts
-
     - id: mcp-json
-      name: /Users/loulan/Documents/loulan/FRONT/dsh-plugins-loulan/packages/mcp-json/src/index.ts
+      name: /Users/loulan/Documents/Program/TS/dsh-plugins-loulan/packages/mcp-json/src/index.ts
+
+    - id: hello
+      name: /Users/loulan/Documents/Program/TS/dsh-plugins-loulan/packages/hello/src/index.ts
