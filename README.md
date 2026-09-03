@@ -4,7 +4,7 @@
 
 | 插件 | 目录 | 作用 |
 |---|---|---|
-| `mcp-json` | [packages/mcp-json](packages/mcp-json) | 自动读取项目下的 `.mcp.json`，把其中的 MCP server 挂载进 DSH |
+| `loulan-mcp` | [packages/mcp](packages/mcp) | 自动读取项目下的 `.mcp.json`，把其中的 MCP server 挂载进 DSH |
 | `hello` | [packages/hello](packages/hello) | 注册斜杠命令 `/hello`，在聊天界面输出「你好」 |
 
 ---
@@ -22,7 +22,7 @@ dsh-plugins-loulan/
 │   ├── link-dsh.sh         # 软链 harness 的 @deepseek-ai/* 包
 │   └── dev.sh              # 一键以本 overlay 启动 DSH Web UI
 └── packages/
-    ├── mcp-json/           # 插件 1
+    ├── mcp/                # 插件 1
     └── hello/              # 插件 2
 ```
 
@@ -67,7 +67,7 @@ cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 
 ---
 
-## 插件 1：mcp-json
+## 插件 1：loulan-mcp
 
 按生命周期分离加载：
 
@@ -108,8 +108,8 @@ cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 ### 配置
 
 ```yaml
-- id: mcp-json
-  name: /绝对/路径/packages/mcp-json/src/index.ts
+- id: loulan-mcp
+  name: /绝对/路径/packages/mcp/src/index.ts
   config:
     cwd: /path/to/.dsh           # .dsh 根目录（启动时全局加载），默认 $DSH_HOME / ~/.dsh；工作区随 agent 动态加载，无需配置
 ```
