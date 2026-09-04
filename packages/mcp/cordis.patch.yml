@@ -1,3 +1,5 @@
 - insert:
     - id: dsh-loulan-mcp
-      name: dsh-loulan-mcp
+      # 相对路径：loader 按本 patch 文件所在目录解析（packages/mcp），
+      # 既可被本地项目 dev.sh 以第二个 --patch 复用，也能在发布为 bundle 后解析到自身 lib/。
+      name: ./lib/index.js

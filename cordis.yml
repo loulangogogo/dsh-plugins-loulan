@@ -6,3 +6,7 @@
 - insert:
     - id: hello
       name: ./packages/hello/src/index.ts
+
+    - id: dsh-loulan-mcp
+      name: ./packages/mcp/src/index.ts
+
