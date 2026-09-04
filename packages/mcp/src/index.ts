@@ -2,8 +2,8 @@
  * @fileoverview dsh-loulan-mcp 插件入口 —— 生命周期编排。
  *
  * - 启动时：挂载 .dsh 根目录的 .mcp.json（全局共享，不询问）。
- * - agent 创建时：探测工作区 .mcp.json，若存在则标记"待决定"，不立即挂载；
- *   在该 agent 的首个对话 turn（agent/request）用 ApprovalService 征求同意，
+ * - agent 创建时：探测工作区 .mcp.json，若存在则同步标记"待决定"，不立即挂载；
+ *   在该 agent 的首个对话 turn（agent/request）读取服务列表并征求同意，
  *   同意后按方案 B 的唯一 serverName 挂载；拒绝/取消/不可用则不挂载。
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -44,14 +44,16 @@ export async function apply(ctx: Context, config: Config) {
     console.log(`[dsh-loulan-mcp] 在 ${rootStart} 及其父目录未找到 .mcp.json，跳过全局 MCP 引入`)
   }
 
-  // 2. agent 创建时：探测工作区 .mcp.json，标记待决定（不立即挂载）。
+  // 2. agent 创建时：探测工作区 .mcp.json，同步标记"待决定"（不立即挂载、不读取内容）。
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
     console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     if (file === undefined || file === rootFile) return
-    void queuePending(agent.id, file)
+    // 同步登记，消除 agent/created 与首个 agent/request 之间的竞态窗口。
+    setDecision(agent.id, 'pending')
+    setPending(agent.id, { file })
   })
 
   // 3. agent 销毁时：清除其决定与待挂载信息。
@@ -60,12 +62,28 @@ export async function apply(ctx: Context, config: Config) {
     clearPending(agent.id)
   })
 
-  // 4. 首个对话 turn（agent/request 瀑布点，open turn）：对该 agent 征求挂载同意。
+  // 4. 首个对话 turn（agent/request 瀑布点，open turn）：读取服务列表并征求挂载同意。
   ctx.on('agent/request', ({ agent }, next) => {
     const work = pendingOf(agent.id)
     if (decisionFor(agent.id) !== 'pending' || work === undefined) return next()
     return (async () => {
-      const decision = await askForApproval(ctx, agent, work)
+      // 在此处（首个 turn）异步读取服务列表，避免在 agent/created 阶段异步造成的竞态。
+      let servers: Record<string, unknown>
+      try {
+        servers = await readMcpServers(work.file)
+      } catch (error) {
+        console.error(`[dsh-loulan-mcp] 解析 ${work.file} 失败，不挂载:`, error)
+        setDecision(agent.id, 'rejected')
+        clearPending(agent.id)
+        return next()
+      }
+      if (Object.keys(servers).length === 0) {
+        console.log(`[dsh-loulan-mcp] ${work.file} 无 MCP 服务，跳过`)
+        setDecision(agent.id, 'rejected')
+        clearPending(agent.id)
+        return next()
+      }
+      const decision = await askForApproval(ctx, agent, work.file, servers)
       setDecision(agent.id, decision)
       clearPending(agent.id)
       if (decision === 'approved') {
@@ -77,22 +95,4 @@ export async function apply(ctx: Context, config: Config) {
       return next()
     })()
   })
-}
-
-/**
- * 探测到工作区 .mcp.json 后：解析并标记该 agent 为"待决定"（不挂载）。
- *
- * 解析失败或服务列表为空时不询问、不挂载。
- */
-async function queuePending(agentId: string, file: string): Promise<void> {
-  let servers: Record<string, unknown>
-  try {
-    servers = await readMcpServers(file)
-  } catch (error) {
-    console.error(`[dsh-loulan-mcp] 解析 ${file} 失败，跳过:`, error)
-    return
-  }
-  if (Object.keys(servers).length === 0) return
-  setDecision(agentId, 'pending')
-  setPending(agentId, { file, servers })
 }
