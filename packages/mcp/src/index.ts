@@ -19,6 +19,7 @@ import * as mcpClient from '@deepseek-ai/dsh-mcp-client'
 import type { Config as McpClientConfig } from '@deepseek-ai/dsh-mcp-client'
 // 仅引入 dsh-agent 的事件类型声明（agent/created），不引入运行时代码。
 import type {} from '@deepseek-ai/dsh-agent'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -47,6 +48,14 @@ const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 
 /** mcp-client 默认的单次工具调用超时（毫秒）：60 秒。 */
 const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000
+
+/**
+ * 已挂载工作区 MCP 的 agent id 集合（方案 B 的同一 agent 去重）。
+ *
+ * 每个 agent（会话）只挂载一次工作区 .mcp.json；同一 agent 重复触发 agent/created
+ * 时跳过，避免同一 agent 用相同 serverName 重复挂载而冲突。agent 销毁时移除。
+ */
+const mountedAgents = new Set<string>()
 
 /**
  * 判断一个值是否为普通对象（非 null、非数组）。
@@ -115,6 +124,37 @@ function dshHome(): string {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
 }
 
+/**
+ * 从 agent/session id 派生一个短、安全、唯一的后缀 token。
+ *
+ * 方案 B：同一工作区可能并发多个 agent/会话，为避免重复挂载同一条 .mcp.json 时
+ * 撞上 mcp-client 的 serverName 唯一性约束，为每个 agent 生成唯一 serverName。
+ * 这里对 agent id 做 SHA-1 并取前 12 位十六进制，字符集恒为 [0-9a-f]，
+ * 满足 SERVER_NAME_PATTERN，且长度足够短，能被 serverName 上限 32 位容纳。
+ *
+ * @param agentId - agent（或 session）id
+ * @returns 12 位十六进制短 token
+ */
+function agentToken(agentId: string): string {
+  return createHash('sha1').update(agentId).digest('hex').slice(0, 12)
+}
+
+/**
+ * 给 serverName 追加唯一后缀，并确保总长不超过 mcp-client 约束的 32 位。
+ *
+ * 超过上限时截断原 base，保留后缀；截断仅影响超长名称（通常 serverName 较短）。
+ *
+ * @param base - .mcp.json 中的原始 serverName
+ * @param suffix - 由 agentToken 生成的唯一后缀（无下划线）
+ * @returns 拼接后的 serverName（形如 postgres_<token>）
+ */
+function suffixedServerName(base: string, suffix: string): string {
+  const withSep = `_${suffix}`
+  const baseMax = 32 - withSep.length
+  const basePart = base.length > baseMax ? base.slice(0, baseMax) : base
+  return `${basePart}${withSep}`
+}
+
 /** mapServer 的返回类型：成功携带 mcp-client 配置，失败携带原因。 */
 type Mapped =
   | { ok: true; config: McpClientConfig }
@@ -133,10 +173,12 @@ type Mapped =
  * @param projectDir - 该 .mcp.json 所在目录，作为 stdio 子进程的默认 cwd
  * @returns 成功时携带 mcp-client 配置；失败时携带原因
  */
-function mapServer(serverName: string, raw: unknown, projectDir: string): Mapped {
-  // 1. 校验服务名：不合法直接拒绝，避免污染工具命名空间。
-  if (!SERVER_NAME_PATTERN.test(serverName)) {
-    return { ok: false, reason: `serverName 不合法（需匹配 [A-Za-z0-9_-]{1,32}）: "${serverName}"` }
+function mapServer(serverName: string, raw: unknown, projectDir: string, uniqueSuffix?: string): Mapped {
+  // 方案 B：若提供后缀，则生成按 agent 唯一的最终 serverName，避免多会话重复挂载冲突。
+  const mountedName = uniqueSuffix ? suffixedServerName(serverName, uniqueSuffix) : serverName
+  // 1. 校验最终服务名：不合法直接拒绝，避免污染工具命名空间。
+  if (!SERVER_NAME_PATTERN.test(mountedName)) {
+    return { ok: false, reason: `serverName 不合法（需匹配 [A-Za-z0-9_-]{1,32}）: "${mountedName}"` }
   }
   // 2. 校验条目结构：必须是普通对象。
   if (!isRecord(raw)) {
@@ -153,7 +195,7 @@ function mapServer(serverName: string, raw: unknown, projectDir: string): Mapped
       ok: true,
       config: {
         transport: 'stdio',
-        serverName,
+        serverName: mountedName,
         command,
         args: asStringArray(raw.args),
         env: asStringRecord(raw.env),
@@ -171,7 +213,7 @@ function mapServer(serverName: string, raw: unknown, projectDir: string): Mapped
       ok: true,
       config: {
         transport: 'streamable-http',
-        serverName,
+        serverName: mountedName,
         url,
         headers: asStringRecord(raw.headers),
         toolCallTimeoutMs: DEFAULT_TOOL_CALL_TIMEOUT_MS,
@@ -193,7 +235,7 @@ function mapServer(serverName: string, raw: unknown, projectDir: string): Mapped
  * @param ctx - 挂载目标：全局 ctx（启动时）或 agent.ctx（工作区，agent 局部）
  * @param file - .mcp.json 文件路径
  */
-async function mountFile(ctx: Context, file: string): Promise<void> {
+async function mountFile(ctx: Context, file: string, uniqueSuffix?: string): Promise<void> {
   let doc: unknown
   // 1. 读取并解析 JSON，失败则跳过该文件（不阻断整体）。
   try {
@@ -212,7 +254,8 @@ async function mountFile(ctx: Context, file: string): Promise<void> {
 
   // 3. 逐条映射并挂载，失败的条目仅告警跳过。
   for (const [serverName, raw] of Object.entries(servers)) {
-    const mapped = mapServer(serverName, raw, projectDir)
+    // 方案 B：把 uniqueSuffix 透传给 mapServer，生成按 agent 唯一的最终 serverName。
+    const mapped = mapServer(serverName, raw, projectDir, uniqueSuffix)
     if (!mapped.ok) {
       console.warn(`[dsh-loulan-mcp] ${mapped.reason}`)
       continue
@@ -221,9 +264,9 @@ async function mountFile(ctx: Context, file: string): Promise<void> {
       // ctx.plugin 返回 fiber，异步完成 mcp-client 的连接与工具发现。
       const fiber = ctx.plugin(mcpClient, mapped.config)
       fibers.push(fiber)
-      console.log(`[dsh-loulan-mcp] 已挂载 MCP server "${serverName}"`)
+      console.log(`[dsh-loulan-mcp] 已挂载 MCP server "${mapped.config.serverName}"`)
     } catch (error) {
-      console.error(`[dsh-loulan-mcp] 挂载 "${serverName}" 失败:`, error)
+      console.error(`[dsh-loulan-mcp] 挂载 "${mapped.config.serverName}" 失败:`, error)
     }
   }
 
@@ -267,7 +310,16 @@ export async function apply(ctx: Context, config: Config) {
     const file = findMcpJson(cwd)
     // 与全局 .dsh 根相同则跳过（避免重复挂载）。
     if (file === undefined || file === rootFile) return
-    // 异步挂载到 agent.ctx：只对该工作区的 agent 可见。
-    void mountFile(agent.ctx, file)
+    // 方案 B：同一 agent/会话只挂载一次，避免重复触发 agent/created 时重复注册 serverName。
+    const agentId = agent.id
+    if (mountedAgents.has(agentId)) return
+    mountedAgents.add(agentId)
+    // 以 agent id 派生唯一后缀，保证不同会话挂载同一条 .mcp.json 时 serverName 不冲突。
+    void mountFile(agent.ctx, file, agentToken(agentId))
+  })
+
+  // 3. agent 销毁时：释放其挂载记录，便于同会话后续重建 agent 时重新挂载。
+  ctx.on('agent/disposed', ({ agent }) => {
+    mountedAgents.delete(agent.id)
   })
 }

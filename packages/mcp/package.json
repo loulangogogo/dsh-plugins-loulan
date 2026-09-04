@@ -19,8 +19,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "prepare": "pnpm build"
+    "build": "tsc -p tsconfig.build.json"
   },
   "dsh": {
     "bundle": {
