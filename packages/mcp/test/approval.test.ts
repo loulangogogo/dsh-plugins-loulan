@@ -57,39 +57,48 @@ test('askForApproval request 抛错返回 rejected', async () => {
   assert.equal(d, 'rejected')
 })
 
-test('mountAndNotify 挂载成功且会话空则注入', async () => {
-  const calls: unknown[] = []
+test('mountAndNotify 挂载成功且会话空则输出通知卡片', async () => {
+  const appends: unknown[] = []
   const agent = {
     id: 'a1',
     ctx: {},
-    session: { surface: { nodes: [] } },
-    followup: (m: unknown): void => { calls.push(m) },
+    session: {
+      surface: { nodes: [] },
+      append: (type: unknown, data: unknown) => { appends.push([type, data]) },
+    },
   } as unknown as Parameters<typeof mountAndNotify>[0]
   const work: MountedServer[] = [{ serverName: 'memory', rawName: 'memory', transport: 'stdio', file: '/x/.mcp.json', tools: ['t1'] }]
   await mountAndNotify(agent, '/x/.mcp.json', [], async () => work)
-  assert.equal(calls.length, 1)
+  // 成对追加 command/run + command/done(log-only 通知,不进模型)。
+  assert.equal(appends.length, 2)
+  assert.equal((appends[0] as unknown[])[0], 'command/run')
+  assert.equal((appends[1] as unknown[])[0], 'command/done')
 })
 
-test('mountAndNotify 会话已有消息则不注入', async () => {
-  const calls: unknown[] = []
+test('mountAndNotify 会话已有消息则不输出', async () => {
+  const appends: unknown[] = []
   const agent = {
     id: 'a1',
     ctx: {},
-    session: { surface: { nodes: [1] } },
-    followup: (m: unknown): void => { calls.push(m) },
+    session: {
+      surface: { nodes: [1] },
+      append: (type: unknown, data: unknown) => { appends.push([type, data]) },
+    },
   } as unknown as Parameters<typeof mountAndNotify>[0]
   await mountAndNotify(agent, '/x/.mcp.json', [], async () => [{ serverName: 'memory', rawName: 'memory', transport: 'stdio', file: '/x/.mcp.json', tools: ['t1'] }])
-  assert.equal(calls.length, 0)
+  assert.equal(appends.length, 0)
 })
 
-test('mountAndNotify 挂载为空则不注入', async () => {
-  const calls: unknown[] = []
+test('mountAndNotify 挂载为空则不输出', async () => {
+  const appends: unknown[] = []
   const agent = {
     id: 'a1',
     ctx: {},
-    session: { surface: { nodes: [] } },
-    followup: (m: unknown): void => { calls.push(m) },
+    session: {
+      surface: { nodes: [] },
+      append: (type: unknown, data: unknown) => { appends.push([type, data]) },
+    },
   } as unknown as Parameters<typeof mountAndNotify>[0]
   await mountAndNotify(agent, '/x/.mcp.json', [], async () => [])
-  assert.equal(calls.length, 0)
+  assert.equal(appends.length, 0)
 })

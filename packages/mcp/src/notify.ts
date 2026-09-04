@@ -1,8 +1,16 @@
 /**
- * @fileoverview 会话内「已挂载 MCP 服务」通知:文案组装与输出。
+ * @fileoverview 会话内「已挂载 MCP 服务」通知：文案组装与输出。
+ *
+ * 通知的呈现方式是「命令结果卡片」：把文案作为 log-only 的 command/run +
+ * command/done 会话事件直接追加到会话日志。log-only 事件永远不会进入模型
+ * 可见的 surface（只有 user/assistant/tool 三类事件会上 surface），因此既不
+ * 唤醒模型、也绝不出现在模型上下文中；Web 客户端内置把这些事件渲染为一张
+ * 立即可见、可持久化的结果卡片（与 /hello 显示「你好」同一通道）。
+ *
+ * 注意：不得用 agent.followup / steer / inject 发送 user 消息来提示——那些都会
+ * 让文案进入模型对话（followup 还会直接唤醒模型开新回合）。
  */
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MountedServer } from './mount.js'
 
 /**
@@ -38,30 +46,59 @@ export function buildMountNotice(globalMounts: MountedServer[], workMounts: Moun
   return lines.join('\n')
 }
 
+/** 结果卡片的标题(命令名)。 */
+const MOUNT_COMMAND_NAME = 'mcp'
+
+// 实例 token + 自增序号用于生成 commandId。会话日志要求 commandId 全局唯一,
+// 实例 token 前缀保证进程重启、在同一会话日志上再次挂载时不会与旧记录重复
+// (参照 dsh-commands 的 mintCommandId 约定:instanceToken 前缀防止恢复日志重复)。
+const INSTANCE_TOKEN = Math.random().toString(36).slice(2, 10)
+let mountSeq = 0
+
+/** command/run 事件的载荷形状(与 dsh-commands 的声明一致)。 */
+interface MountCommandRunData {
+  commandId: string
+  name: string
+  source: { kind: 'user' }
+}
+
+/** command/done 事件的载荷形状(与 dsh-commands 的声明一致)。 */
+interface MountCommandDoneData {
+  commandId: string
+  kind: 'success'
+  text: string
+}
+
 /**
- * 把通知文案作为 sourced 用户消息，立即唤醒 agent 输出（加载完成即播报）。
+ * 在当前会话里以命令结果卡片的形式输出「已挂载 MCP 服务」通知。
  *
- * 消息以 <system-reminder> 包裹并标记为 notice 形式，引导模型把它当作
- * 系统通知、无需回应；前端会渲染成通知注记而非普通对话气泡。
+ * 通知文案作为 log-only 的 command/run + command/done 事件直接追加到
+ * agent.session 日志：不唤醒模型、不进模型上下文，仅用户可见；UI 立即渲染为
+ * 一张结果卡片（可点开看多行服务清单），并随会话日志持久化。
  *
- * @param agent - 目标 agent
- * @param text - 通知文案（服务清单）
- * @param summary - 一行摘要，供前端折叠显示
+ * 这里刻意不 import @deepseek-ai/dsh-commands 的类型：command 生命周期是
+ * dsh-commands 声明的 log-only 会话事件，但本插件不想因此引入对 dsh-commands
+ * 的依赖，故按相同载荷形状就地书写（Session.append 对 log-only 事件只接受
+ * type + data 两个参数）。
+ *
+ * @param agent - 目标 agent（取其 session 追加事件）
+ * @param text - 通知文案（服务清单，多行）
  */
-export function announceMountNotice(agent: Agent, text: string, summary: string): void {
-  const content = [
-    '<system-reminder>',
+export function announceMountNotice(agent: Agent, text: string): void {
+  mountSeq += 1
+  const commandId = `mcp-${INSTANCE_TOKEN}-${mountSeq}`
+  const append = agent.session.append.bind(agent.session) as (
+    type: 'command/run' | 'command/done',
+    data: MountCommandRunData | MountCommandDoneData,
+  ) => unknown
+  append('command/run', {
+    commandId,
+    name: MOUNT_COMMAND_NAME,
+    source: { kind: 'user' },
+  } satisfies MountCommandRunData)
+  append('command/done', {
+    commandId,
+    kind: 'success',
     text,
-    '此通知仅用于告知当前已加载的 MCP 服务，无需回应。',
-    '</system-reminder>',
-  ].join('\n')
-  agent.followup(createUserMessage({
-    content: [{ type: 'text', text: content }],
-    source: {
-      kind: 'plugin',
-      plugin: 'dsh-loulan-mcp',
-      form: 'notice',
-      summary,
-    },
-  }))
+  } satisfies MountCommandDoneData)
 }

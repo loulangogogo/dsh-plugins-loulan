@@ -101,8 +101,9 @@ export async function askForApproval(
 }
 
 /**
- * 挂载工作区 .mcp.json 并在会话尚未开始时输出可见通知。
+ * 挂载工作区 .mcp.json 并在会话尚未开始对话时输出用户可见通知。
  *
+ * 通知以命令结果卡片（log-only 会话事件）呈现，不唤醒模型、不进模型上下文；
  * 挂载失败/无成功服务、会话已有消息、或文案为空时不输出。
  * mount 参数可注入桩，便于单测。
  *
@@ -119,11 +120,11 @@ export async function mountAndNotify(
 ): Promise<void> {
   const work = await mount(agent.ctx, file, agentToken(agent.id))
   if (work.length === 0) return
-  // 会话已经开始对话则不再输出（防 resume 重复、防迟到打断）。
+  // 会话已经开始对话则不再输出（防 resume 重复、防迟到插入）。
   if (agent.session.surface.nodes.length !== 0) return
   const text = buildMountNotice(globalMounts, work)
   if (text === undefined) return
-  announceMountNotice(agent, text, `已自动挂载 ${work.length} 个 MCP 服务`)
+  announceMountNotice(agent, text)
 }
 
 /**
@@ -144,7 +145,8 @@ export function registerAgentCreated(ctx: Context, rootFile: string | undefined,
     const file = findMcpJson(cwd)
     if (file === undefined || file === rootFile) return
 
-    // 当前实现：发现工作区 .mcp.json 即自动挂载，并在会话未开始时注入可见通知。
+    // 当前实现：发现工作区 .mcp.json 即自动挂载，并在会话未开始对话时以命令
+    // 结果卡片输出可见通知（log-only，不唤醒模型、不进模型上下文）。
     console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
     void mountAndNotify(agent, file, globalMounts).catch((error: unknown) => {
       console.error(`[dsh-loulan-mcp] 工作区 ${cwd} 挂载/通知失败:`, error)
