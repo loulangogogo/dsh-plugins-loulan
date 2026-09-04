@@ -1,6 +1,6 @@
 {
   "name": "dsh-loulan-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "自动读取 .mcp.json（.dsh 根 + 工作区）并挂载其中的 MCP server",
   "main": "lib/index.js",
