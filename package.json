@@ -8,7 +8,6 @@
     "link:dsh": "bash scripts/link-dsh.sh",
     "dev": "bash scripts/dev.sh",
     "test-mcp": "bash scripts/test-mcp.sh",
-    "test": "pnpm --filter dsh-loulan-mcp test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
