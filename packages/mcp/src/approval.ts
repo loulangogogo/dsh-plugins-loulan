@@ -1,15 +1,18 @@
 /**
- * @fileoverview 工作区 MCP 挂载前的用户审批。
+ * @fileoverview 工作区 .mcp.json 的自动挂载。
  *
- * 在 agent 的首个对话 turn 调用 DSH 的 ApprovalService 征求用户同意：
- * 同意则挂载，拒绝/取消/不可用则不挂载。同一 agent 只询问一次，本次运行期间记住。
+ * - agent 创建时（agent/created）发现工作区 .mcp.json（与全局 .dsh 根命中同一
+ *   文件则跳过），即自动挂载到该 agent，无需用户询问；agent 销毁时随
+ *   agent.ctx 作用域自动卸载。
+ * - 原「首个对话回合经 ApprovalService 审批后挂载」的询问实现已停用：
+ *   registerAgentRequest 以注释形式整体保留在下方；askForApproval 与决定状态
+ *   Map 保留导出，供既有测试与日后恢复询问模式使用。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 // 仅引入 dsh-agent 的事件类型声明（agent/created、agent/disposed、agent/request），确保 ctx.on 类型推断。
 import type {} from '@deepseek-ai/dsh-agent'
 import { findMcpJson } from './discover.js'
-import { readMcpServers } from './parse.js'
 import { agentToken } from './server-name.js'
 import { mountFile } from './mount.js'
 
@@ -23,6 +26,9 @@ export interface PendingWork {
 }
 
 // 进程内记住每个 agent 的决定与待挂载信息（本次运行期间生效）。
+// 注意：自动挂载后生产流程不再写入这两个 Map（registerAgentCreated 已不再登记
+// pending），仅 registerAgentDisposed 兜底清理；保留导出供既有测试与日后恢复
+// 询问模式使用。
 const decisions = new Map<string, AgentDecision>()
 const pendingWorks = new Map<string, PendingWork>()
 
@@ -60,7 +66,10 @@ export function clearPending(agentId: string): void {
 const APPROVAL_TOOL_NAME = 'dsh-loulan-mcp:mount'
 
 /**
- * 在 open turn 内征求用户是否挂载工作区的 MCP 服务。
+ * 【已停用】在 open turn 内征求用户是否挂载工作区的 MCP 服务。
+ *
+ * 自动挂载后不再被调用（registerAgentRequest 的询问流程已注释停用）。
+ * 本函数保留导出（含既有单测引用），供日后恢复「询问后挂载」模式时使用。
  *
  * @param ctx - 插件上下文，用于读取审批服务（ctx.get('approval')）
  * @param agent - 发起请求的 agent（审批 UI 路由与审计的目标）
@@ -91,10 +100,11 @@ export async function askForApproval(
 }
 
 /**
- * 注册 agent/created 监听：探测工作区 .mcp.json 并标记"待决定"（不立即挂载）。
+ * 注册 agent/created 监听：探测工作区 .mcp.json，命中即自动挂载（不询问）。
  *
- * 同一 agent 已决定（approved/rejected/pending）则不重置，避免重复询问/重复挂载；
- * 同步登记，消除 agent/created 与首个 agent/request 之间的竞态窗口。
+ * 与全局 .dsh 根命中同一文件（rootFile）则跳过，避免重复挂载。
+ * 挂载为 fire-and-forget：created 监听器异步失败仅被 harness 告警收纳、
+ * 不阻断 agent 创建；agent 销毁时挂载随 agent.ctx 作用域自动卸载，无需在此清理。
  *
  * @param ctx - 插件上下文
  * @param rootFile - 全局 .dsh 根的 .mcp.json 路径（命中则跳过，避免与全局重复）
@@ -105,10 +115,17 @@ export function registerAgentCreated(ctx: Context, rootFile: string | undefined)
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     if (file === undefined || file === rootFile) return
-    console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
-    if (decisionFor(agent.id) !== undefined) return
-    setDecision(agent.id, 'pending')
-    setPending(agent.id, { file })
+
+    // 当前实现：发现工作区 .mcp.json 即自动挂载（serverName 追加 agent 唯一后缀）。
+    console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
+    void mountFile(agent.ctx, file, agentToken(agent.id))
+
+    // === 旧实现（登记"待决定"，配合 agent/request 审批询问后挂载），已停用，保留供恢复 ===
+    // console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
+    // if (decisionFor(agent.id) !== undefined) return
+    // setDecision(agent.id, 'pending')
+    // setPending(agent.id, { file })
+    // ============================================================================
   })
 }
 
@@ -125,43 +142,46 @@ export function registerAgentDisposed(ctx: Context): void {
 }
 
 /**
- * 注册 agent/request 监听（首个对话 turn，open turn）：
- * 读取工作区服务列表并征求挂载同意，同意后挂载、拒绝/取消/不可用则不挂载。
+ * 【已停用】注册 agent/request 监听：首个对话回合经审批后挂载。
  *
- * 进入 async 前同步清除 pending（标记"询问中"），防止 agent/request 重入导致重复询问/挂载。
+ * 自动挂载后工作区 .mcp.json 已在 agent 创建时挂载（见 registerAgentCreated），
+ * 不再需要审批询问，故本函数整体注释停用；下方逐行保留原实现，供日后恢复
+ * 「询问后挂载」模式。恢复步骤：
+ *   1. 取消本注释块，并恢复 registerAgentCreated 函数体中登记的旧逻辑（见其行内注释）；
+ *   2. 在文件头部 import 中补回 readMcpServers；
+ *   3. 在 index.ts 中取消 registerAgentRequest 的 import 与调用注释。
  *
- * @param ctx - 插件上下文
+ * export function registerAgentRequest(ctx: Context): void {
+ *   ctx.on('agent/request', ({ agent }, next) => {
+ *     const work = pendingOf(agent.id)
+ *     if (decisionFor(agent.id) !== 'pending' || work === undefined) return next()
+ *     // 同步清除 pending（标记"询问中"），防止 agent/request 重入导致重复询问/重复挂载。
+ *     clearPending(agent.id)
+ *     return (async () => {
+ *       // 在此处（首个 turn）异步读取服务列表，避免在 agent/created 阶段异步造成的竞态。
+ *       let servers: Record<string, unknown>
+ *       try {
+ *         servers = await readMcpServers(work.file)
+ *       } catch (error) {
+ *         console.error(`[dsh-loulan-mcp] 解析 ${work.file} 失败，不挂载:`, error)
+ *         setDecision(agent.id, 'rejected')
+ *         return next()
+ *       }
+ *       if (Object.keys(servers).length === 0) {
+ *         console.log(`[dsh-loulan-mcp] ${work.file} 无 MCP 服务，跳过`)
+ *         setDecision(agent.id, 'rejected')
+ *         return next()
+ *       }
+ *       const decision = await askForApproval(ctx, agent, work.file, servers)
+ *       setDecision(agent.id, decision)
+ *       if (decision === 'approved') {
+ *         console.log(`[dsh-loulan-mcp] 已同意，挂载 ${work.file}`)
+ *         void mountFile(agent.ctx, work.file, agentToken(agent.id))
+ *       } else {
+ *         console.log(`[dsh-loulan-mcp] 未同意，跳过挂载 ${work.file}`)
+ *       }
+ *       return next()
+ *     })()
+ *   })
+ * }
  */
-export function registerAgentRequest(ctx: Context): void {
-  ctx.on('agent/request', ({ agent }, next) => {
-    const work = pendingOf(agent.id)
-    if (decisionFor(agent.id) !== 'pending' || work === undefined) return next()
-    // 同步清除 pending（标记"询问中"），防止 agent/request 重入导致重复询问/重复挂载。
-    clearPending(agent.id)
-    return (async () => {
-      // 在此处（首个 turn）异步读取服务列表，避免在 agent/created 阶段异步造成的竞态。
-      let servers: Record<string, unknown>
-      try {
-        servers = await readMcpServers(work.file)
-      } catch (error) {
-        console.error(`[dsh-loulan-mcp] 解析 ${work.file} 失败，不挂载:`, error)
-        setDecision(agent.id, 'rejected')
-        return next()
-      }
-      if (Object.keys(servers).length === 0) {
-        console.log(`[dsh-loulan-mcp] ${work.file} 无 MCP 服务，跳过`)
-        setDecision(agent.id, 'rejected')
-        return next()
-      }
-      const decision = await askForApproval(ctx, agent, work.file, servers)
-      setDecision(agent.id, decision)
-      if (decision === 'approved') {
-        console.log(`[dsh-loulan-mcp] 已同意，挂载 ${work.file}`)
-        void mountFile(agent.ctx, work.file, agentToken(agent.id))
-      } else {
-        console.log(`[dsh-loulan-mcp] 未同意，跳过挂载 ${work.file}`)
-      }
-      return next()
-    })()
-  })
-}

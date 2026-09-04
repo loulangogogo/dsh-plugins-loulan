@@ -1,16 +1,15 @@
 # dsh-loulan-mcp
 
-自动读取 `.mcp.json` 并在征得用户同意后挂载 MCP server 的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件。
+自动读取 `.mcp.json` 并挂载 MCP server 的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件。
 
 ## 特性
 
 - **双来源、不同策略**：
-  - `.dsh` 根目录（`~/.dsh`）的全局 `.mcp.json`：DSH 启动时**自动挂载**，所有 agent 共享，**不询问**；
-  - 工作区（`session.header.cwd`）的 `.mcp.json`：agent 创建时发现，**首个对话回合征求用户同意后才挂载**。
-- **挂载前审批**：插件把待挂载的 MCP 服务列给用户确认；同意才挂载，拒绝/取消/不可用则不挂载。**每次新建 agent 都会独立询问一次**（无全局记忆）；没有 `.mcp.json` 的工作区不询问。
+  - `.dsh` 根目录（`~/.dsh`）的全局 `.mcp.json`：DSH 启动时**自动挂载**，所有 agent 共享；
+  - 工作区（`session.header.cwd`）的 `.mcp.json`：**agent 创建时发现即自动挂载**，仅对该 agent 的对话可见，agent 销毁自动卸载。
+- **自动挂载、无需审批**：工作区命中 `.mcp.json` 即在 agent 创建时挂载，不征求用户同意；没有 `.mcp.json` 的工作区不挂载。
 - **两种传输**：stdio（本地子进程）与 streamable-http（远程服务）。
 - **多会话互不冲突**：工作区挂载时按 agent 生成唯一 `serverName`（工具形如 `mcp__<serverName>__<agentToken>__<tool>`），同一工作区并发多个会话时各自独立、互不冲突。
-- **fail-closed**：无审批服务时，工作区 MCP 不会挂载并给出告警。
 
 ## 安装
 
@@ -20,23 +19,23 @@
 dsh plugin --profile web add dsh-loulan-mcp
 ```
 
-## 挂载前审批（工作区）
+## 工作区自动挂载
 
-工作区 `.mcp.json` 里的 MCP 服务**不会自动挂载**，需要用户确认：
+工作区 `.mcp.json` 里的 MCP 服务在 **agent 创建时发现即自动挂载**，无需用户确认：
 
-1. **agent 创建时**：插件在工作区发现 `.mcp.json`（且与全局根文件不同），标记该 agent 为"待决定"，**不立即挂载**；
-2. **首个对话回合**（模型开始工作前）：插件弹出审批，列明将挂载的 MCP 服务（如 `postgres`、`Machine-API`）；
-3. **同意** → 挂载（为该 agent 生成带唯一后缀的 `serverName`）；**拒绝 / 取消 / 无审批通道** → 不挂载；
-4. 同一 agent 只询问一次（决定在该 agent 生命周期内记住）；但**每次新建 agent 都会再次询问**，不做全局记忆。
+1. **agent 创建时**：插件在工作区发现 `.mcp.json`（且与全局根文件不同），立即自动挂载到该 agent；
+2. 挂载为该 agent 生成带唯一后缀的 `serverName`；**agent 销毁时随 `agent.ctx` 作用域自动卸载**。
 
-> 无 `.mcp.json` 的工作区不询问、不挂载；全局 `.dsh` 根 `.mcp.json` 不询问、启动即自动挂载。
+> 无 `.mcp.json` 的工作区不挂载；全局 `.dsh` 根 `.mcp.json` 启动时即自动挂载。
+> 原「首个对话回合征求用户同意后挂载」的审批实现已停用，代码以注释形式保留在 `src/approval.ts`
+> （`askForApproval` 与 `registerAgentRequest`），如需恢复询问模式可按其中注释指引还原。
 
 ## 加载时机
 
 | 来源 | 时机 | 作用域 |
 |---|---|---|
-| `.dsh` 根目录（`~/.dsh`）的 `.mcp.json` | DSH 启动时 | 全局（所有 agent 共享，自动挂载、不询问） |
-| 工作区根目录（`session.header.cwd`）的 `.mcp.json` | agent 创建时发现；**首个对话回合经用户同意后**挂载 | 仅该 agent（挂载带唯一后缀） |
+| `.dsh` 根目录（`~/.dsh`）的 `.mcp.json` | DSH 启动时 | 全局（所有 agent 共享，自动挂载） |
+| 工作区根目录（`session.header.cwd`）的 `.mcp.json` | agent 创建时发现即自动挂载 | 仅该 agent（挂载带唯一后缀） |
 
 ## 配置
 
@@ -44,7 +43,7 @@ dsh plugin --profile web add dsh-loulan-mcp
 |---|---|---|
 | `cwd` | `.dsh` 根目录（启动时全局加载 `.mcp.json` 的起点） | `$DSH_HOME` 或 `~/.dsh` |
 
-工作区部分无需配置，随 agent 的 `session.header.cwd` 自动发现；挂载前审批为默认行为，无需开关。
+工作区部分无需配置，随 agent 的 `session.header.cwd` 自动发现并自动挂载，无需开关。
 
 如需覆盖默认值，在 profile 的 `cordis.patch.yml` 中配置：
 
@@ -86,8 +85,7 @@ dsh plugin --profile web add dsh-loulan-mcp
 ## 约束与注意
 
 - **serverName 约束**：须匹配 `[A-Za-z0-9_-]{1,32}`；工作区挂载会追加 agent 唯一后缀（形如 `postgres_<token>`）。
-- **工作区挂载需审批**：同一 agent 只询问一次；新建 agent 会再次询问（无全局记忆）。审批请求的 `toolName` 为合成占位名 `dsh-loulan-mcp:mount`，`reason` 里列出待挂载服务。
-- **fail-closed**：无审批服务或审批失败时，工作区 MCP 不挂载并告警。
+- **自动挂载**：工作区 `.mcp.json` 在 agent 创建时发现即挂载，不征求同意；原审批实现注释保留于 `src/approval.ts`。
 - **去重**：工作区与 `.dsh` 根命中同一个 `.mcp.json` 文件时，跳过工作区挂载（避免重复）。
 - **超时**：单次工具调用默认 60 秒。
 - **依赖版本**：本插件依赖 `@deepseek-ai/dsh-mcp-client`，其版本须与 DSH 运行时一致，否则可能出现两份 mcp-client 导致工具注册冲突。
