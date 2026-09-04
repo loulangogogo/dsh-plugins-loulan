@@ -51,6 +51,8 @@ export async function apply(ctx: Context, config: Config) {
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     if (file === undefined || file === rootFile) return
+    // 同一 agent 已决定（approved/rejected/pending）则不重置，避免重复询问/重复挂载。
+    if (decisionFor(agent.id) !== undefined) return
     // 同步登记，消除 agent/created 与首个 agent/request 之间的竞态窗口。
     setDecision(agent.id, 'pending')
     setPending(agent.id, { file })
@@ -66,6 +68,8 @@ export async function apply(ctx: Context, config: Config) {
   ctx.on('agent/request', ({ agent }, next) => {
     const work = pendingOf(agent.id)
     if (decisionFor(agent.id) !== 'pending' || work === undefined) return next()
+    // 同步清除 pending（标记"询问中"），防止 agent/request 重入导致重复询问/重复挂载。
+    clearPending(agent.id)
     return (async () => {
       // 在此处（首个 turn）异步读取服务列表，避免在 agent/created 阶段异步造成的竞态。
       let servers: Record<string, unknown>
@@ -74,18 +78,15 @@ export async function apply(ctx: Context, config: Config) {
       } catch (error) {
         console.error(`[dsh-loulan-mcp] 解析 ${work.file} 失败，不挂载:`, error)
         setDecision(agent.id, 'rejected')
-        clearPending(agent.id)
         return next()
       }
       if (Object.keys(servers).length === 0) {
         console.log(`[dsh-loulan-mcp] ${work.file} 无 MCP 服务，跳过`)
         setDecision(agent.id, 'rejected')
-        clearPending(agent.id)
         return next()
       }
       const decision = await askForApproval(ctx, agent, work.file, servers)
       setDecision(agent.id, decision)
-      clearPending(agent.id)
       if (decision === 'approved') {
         console.log(`[dsh-loulan-mcp] 已同意，挂载 ${work.file}`)
         void mountFile(agent.ctx, work.file, agentToken(agent.id))
