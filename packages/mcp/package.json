@@ -19,7 +19,8 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "bash scripts/test-unit.sh"
   },
   "dsh": {
     "bundle": {

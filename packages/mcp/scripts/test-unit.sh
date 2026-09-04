@@ -7,8 +7,8 @@ set -euo pipefail
 # NodeNext 风格的 .js 相对导入；tsx 会正确地把 .js 解析到对应的 .ts。
 # 这里复用 harness 自带的 tsx，不额外引入项目 devDependency。
 
-# 项目根目录：脚本所在目录（scripts/）的上一级。
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 项目根目录：脚本所在目录（packages/mcp/scripts/）的上三级。
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 # 引用统一环境配置：读取 DSH_HARNESS（缺省 ~/.dsh/deepseek-harness）。
 source "$ROOT/scripts/dsh.env"
 
