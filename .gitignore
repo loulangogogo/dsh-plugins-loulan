@@ -7,3 +7,5 @@ packages/*/lib/
 .claude
 .qoder
 .dsh
+# superpowers 自动生成文档
+**/superpowers/
