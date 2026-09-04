@@ -42,7 +42,7 @@ packages/mcp/src/
 
 **Files:**
 - Create: `packages/mcp/src/config.ts`
-- Modify: `packages/mcp/src/index.ts`（删除其中的 `name` / `Config` 接口 / `Config` Schema，改为 re-export）
+- （本任务不改 `index.ts`；`index.ts` 在 Task 7 统一改为从 `config.ts` re-export）
 
 **Interfaces:**
 - Produces: `export const name: 'dsh-loulan-mcp'`、`export interface Config { cwd: string }`、`export const Config: Schema<Config>`。
@@ -93,7 +93,7 @@ git commit -m "refactor(mcp): 拆分插件配置到 config.ts"
 
 **Files:**
 - Create: `packages/mcp/src/discover.ts`
-- Modify: `packages/mcp/src/index.ts`（改用 `findMcpJson`/`dshHome`）
+- （本任务不改 `index.ts`；`index.ts` 在 Task 7 统一接入 `findMcpJson`/`dshHome`）
 
 **Interfaces:**
 - Produces: `findMcpJson(start: string): string | undefined`、`dshHome(): string`。
@@ -147,7 +147,7 @@ git commit -m "refactor(mcp): 拆分 .mcp.json 发现到 discover.ts"
 
 **Files:**
 - Create: `packages/mcp/src/parse.ts`
-- Modify: `packages/mcp/src/index.ts`（改用 `readMcpServers`/`isRecord` 等）
+- （本任务不改 `index.ts`；`index.ts` 在 Task 7 统一接入 `readMcpServers`）
 
 **Interfaces:**
 - Produces: `isRecord(value: unknown): value is Record<string, unknown>`、`asStringArray(value: unknown): string[]`、`asStringRecord(value: unknown): Record<string, string>`、`readMcpServers(file: string): Promise<Record<string, unknown>>`（读取/解析失败时 throw）。
@@ -220,7 +220,7 @@ git commit -m "refactor(mcp): 拆分解析与防御校验到 parse.ts"
 
 **Files:**
 - Create: `packages/mcp/src/server-name.ts`
-- Modify: `packages/mcp/src/index.ts`（改用 `mapServer`/`agentToken` 等）
+- （本任务不改 `index.ts`；`index.ts` 在 Task 7 统一接入 `agentToken`）
 
 **Interfaces:**
 - Produces: `SERVER_NAME_PATTERN`、`DEFAULT_TOOL_CALL_TIMEOUT_MS`、`type Mapped`、`agentToken(agentId: string): string`、`suffixedServerName(base: string, suffix: string): string`、`mapServer(serverName, raw, projectDir, uniqueSuffix?): Mapped`。
@@ -350,7 +350,7 @@ git commit -m "refactor(mcp): 拆分 serverName 生成与映射到 server-name.t
 
 **Files:**
 - Create: `packages/mcp/src/mount.ts`
-- Modify: `packages/mcp/src/index.ts`（改用 `mountFile`）
+- （本任务不改 `index.ts`；`index.ts` 在 Task 7 统一接入 `mountFile`）
 
 **Interfaces:**
 - Produces: `mountFile(ctx: Context, file: string, uniqueSuffix?: string): Promise<void>`。
