@@ -12,8 +12,12 @@ set -euo pipefail
 #   bash scripts/link-dsh.sh /path/to/deepseek-harness
 #   或  DSH_HARNESS=/path/to/deepseek-harness bash scripts/link-dsh.sh
 
-# harness 路径：优先取 DSH_HARNESS 环境变量，其次取第 1 个位置参数。
-HARNESS="${DSH_HARNESS:-$HOME/.dsh/deepseek-harness}"
+# 项目根目录：脚本所在目录的上一级。
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 引用根目录统一环境配置：读取 DSH_HARNESS（缺省 ~/.dsh/deepseek-harness）。
+source "$ROOT/scripts/dsh.env"
+# harness 路径：位置参数 > DSH_HARNESS（环境变量/统一配置）。
+HARNESS="${1:-$DSH_HARNESS}"
 # 两者都未提供时打印用法并退出。
 if [[ -z "$HARNESS" ]]; then
   echo "用法: $0 <path-to-deepseek-harness>" >&2
@@ -23,8 +27,6 @@ fi
 
 # 统一为绝对路径（cd + pwd），避免相对路径导致软链指向错误。
 HARNESS="$(cd "$HARNESS" && pwd)"
-# 项目根目录：脚本所在目录的上一级。
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # 软链目标目录：项目 node_modules 下的 @deepseek-ai 命名空间。
 DEST="$ROOT/node_modules/@deepseek-ai"
 

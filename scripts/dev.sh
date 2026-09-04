@@ -5,10 +5,12 @@ set -euo pipefail
 # 用本项目的 cordis.yml 作为 patch overlay 启动 DSH Web UI。
 # 通过 DSH_HARNESS 指定 harness checkout 位置（默认 ~/.dsh/deepseek-harness）。
 
-# harness checkout 目录：优先取 DSH_HARNESS 环境变量，缺省回退到 ~/.dsh/deepseek-harness。
-HARNESS="${DSH_HARNESS:-$HOME/.dsh/deepseek-harness}"
 # 项目根目录：脚本所在目录（scripts/）的上一级。
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 引用根目录统一环境配置：读取 DSH_HARNESS（缺省 ~/.dsh/deepseek-harness）。
+source "$ROOT/scripts/dsh.env"
+# harness checkout 目录，来自统一配置。
+HARNESS="$DSH_HARNESS"
 
 # 前置校验：harness 目录必须存在，否则给出提示并退出。
 if [[ ! -d "$HARNESS" ]]; then
