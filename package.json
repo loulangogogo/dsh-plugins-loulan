@@ -8,6 +8,7 @@
     "link:dsh": "bash scripts/link-dsh.sh",
     "dev": "bash scripts/dev.sh",
     "test-mcp": "bash scripts/test-mcp.sh",
+    "test": "bash scripts/test-unit.sh",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
