@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isRecord, asStringArray, asStringRecord, readMcpServers } from './parse.js'
+import { isRecord, asStringArray, asStringRecord, readMcpServers } from '../src/parse.js'
 
 test('isRecord 仅接受普通对象', () => {
   assert.equal(isRecord({}), true)

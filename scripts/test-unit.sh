@@ -23,5 +23,5 @@ if [[ ! -x "$TSX" ]]; then
 fi
 
 # exec 用 tsx 进程替换当前 shell；--test 走 Node 测试运行器，
-# 匹配 mcp 包 src 目录下的所有 *.test.ts。
-exec "$TSX" --test "$ROOT/packages/mcp/src/"*.test.ts
+# 匹配 mcp 包 test 目录下的所有 *.test.ts。
+exec "$TSX" --test "$ROOT/packages/mcp/test/"*.test.ts

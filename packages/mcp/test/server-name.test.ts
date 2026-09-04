@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { agentToken, suffixedServerName, mapServer, SERVER_NAME_PATTERN } from './server-name.js'
+import { agentToken, suffixedServerName, mapServer, SERVER_NAME_PATTERN } from '../src/server-name.js'
 
 test('agentToken 生成 12 位十六进制且对相同输入稳定', () => {
   const t = agentToken('agent-abc')

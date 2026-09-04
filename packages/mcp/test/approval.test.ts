@@ -8,7 +8,7 @@ import {
   setPending,
   clearPending,
   askForApproval,
-} from './approval.js'
+} from '../src/approval.js'
 
 type Ctx = Parameters<typeof askForApproval>[0]
 type Agt = Parameters<typeof askForApproval>[1]
