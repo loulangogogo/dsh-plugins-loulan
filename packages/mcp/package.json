@@ -1,6 +1,6 @@
 {
   "name": "dsh-loulan-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "自动读取 .mcp.json（.dsh 根 + 工作区）并挂载其中的 MCP server",
   "main": "lib/index.js",
@@ -28,7 +28,7 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-mcp-client": "0.1.2-alpha.5",
+    "@deepseek-ai/dsh-mcp-client": "0.1.2-rc.1",
     "@deepseek-ai/schemastery": "3.18.2"
   }
 }
