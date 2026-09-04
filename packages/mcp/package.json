@@ -1,6 +1,6 @@
 {
   "name": "dsh-loulan-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "自动读取 .mcp.json（.dsh 根 + 工作区）并挂载其中的 MCP server",
   "main": "lib/index.js",
@@ -20,7 +20,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "bash scripts/test-unit.sh"
+    "test": "bash scripts/test-unit.sh",
+    "mcp-pack": "pnpm pack",
+    "release": "pnpm login && pnpm build && pnpm publish --no-git-checks"
   },
   "dsh": {
     "bundle": {

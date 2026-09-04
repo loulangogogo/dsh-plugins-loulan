@@ -40,17 +40,16 @@ export async function apply(ctx: Context, config: Config) {
   // 1. 启动时：在全局 ctx 上挂载 .dsh 根目录的 .mcp.json（所有 agent 共享，不询问）。
   if (rootFile) {
     await mountFile(ctx, rootFile)
-  } else {
-    console.log(`[dsh-loulan-mcp] 在 ${rootStart} 及其父目录未找到 .mcp.json，跳过全局 MCP 引入`)
   }
 
   // 2. agent 创建时：探测工作区 .mcp.json，同步标记"待决定"（不立即挂载、不读取内容）。
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
-    console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     if (file === undefined || file === rootFile) return
+    // 挂载进行打印
+    console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
     // 同一 agent 已决定（approved/rejected/pending）则不重置，避免重复询问/重复挂载。
     if (decisionFor(agent.id) !== undefined) return
     // 同步登记，消除 agent/created 与首个 agent/request 之间的竞态窗口。
