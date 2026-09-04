@@ -9,6 +9,8 @@ import {
   clearPending,
   askForApproval,
 } from '../src/approval.js'
+import { mountAndNotify } from '../src/approval.js'
+import type { MountedServer } from '../src/mount.js'
 
 type Ctx = Parameters<typeof askForApproval>[0]
 type Agt = Parameters<typeof askForApproval>[1]
@@ -53,4 +55,41 @@ test('askForApproval request 抛错返回 rejected', async () => {
   const ctx = { get: () => ({ request: async () => { throw new Error('boom') } }) } as unknown as Ctx
   const d = await askForApproval(ctx, { id: 'a1' } as unknown as Agt, '/x/.mcp.json', { postgres: {} })
   assert.equal(d, 'rejected')
+})
+
+test('mountAndNotify 挂载成功且会话空则注入', async () => {
+  const calls: unknown[] = []
+  const agent = {
+    id: 'a1',
+    ctx: {},
+    session: { surface: { nodes: [] } },
+    followup: (m: unknown): void => { calls.push(m) },
+  } as unknown as Parameters<typeof mountAndNotify>[0]
+  const work: MountedServer[] = [{ serverName: 'memory', rawName: 'memory', transport: 'stdio', file: '/x/.mcp.json', tools: ['t1'] }]
+  await mountAndNotify(agent, '/x/.mcp.json', [], async () => work)
+  assert.equal(calls.length, 1)
+})
+
+test('mountAndNotify 会话已有消息则不注入', async () => {
+  const calls: unknown[] = []
+  const agent = {
+    id: 'a1',
+    ctx: {},
+    session: { surface: { nodes: [1] } },
+    followup: (m: unknown): void => { calls.push(m) },
+  } as unknown as Parameters<typeof mountAndNotify>[0]
+  await mountAndNotify(agent, '/x/.mcp.json', [], async () => [{ serverName: 'memory', rawName: 'memory', transport: 'stdio', file: '/x/.mcp.json', tools: ['t1'] }])
+  assert.equal(calls.length, 0)
+})
+
+test('mountAndNotify 挂载为空则不注入', async () => {
+  const calls: unknown[] = []
+  const agent = {
+    id: 'a1',
+    ctx: {},
+    session: { surface: { nodes: [] } },
+    followup: (m: unknown): void => { calls.push(m) },
+  } as unknown as Parameters<typeof mountAndNotify>[0]
+  await mountAndNotify(agent, '/x/.mcp.json', [], async () => [])
+  assert.equal(calls.length, 0)
 })

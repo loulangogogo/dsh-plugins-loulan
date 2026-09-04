@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { name, Config } from './config.js'
 import { findMcpJson, dshHome } from './discover.js'
-import { mountFile } from './mount.js'
+import { mountFile, type MountedServer } from './mount.js'
 import { registerAgentCreated, registerAgentDisposed } from './approval.js'
 
 export { name, Config }
@@ -19,15 +19,13 @@ export { name, Config }
  *
  * @param ctx - 插件上下文
  * @param config - 插件配置（cwd 指定 .dsh 根目录）
- * @returns 命中的全局 .mcp.json 绝对路径；不存在返回 undefined（供工作区监听去重跳过）
+ * @returns 命中的全局 .mcp.json 绝对路径与已挂载明细；未命中时 rootFile 为 undefined、mounts 为空数组
  */
-async function mountGlobalRoot(ctx: Context, config: Config): Promise<string | undefined> {
+async function mountGlobalRoot(ctx: Context, config: Config): Promise<{ rootFile: string | undefined; mounts: MountedServer[] }> {
   const rootStart = config.cwd || dshHome()
   const rootFile = findMcpJson(rootStart)
-  if (rootFile) {
-    await mountFile(ctx, rootFile)
-  }
-  return rootFile
+  const mounts = rootFile ? await mountFile(ctx, rootFile) : []
+  return { rootFile, mounts }
 }
 
 /**
@@ -40,11 +38,11 @@ async function mountGlobalRoot(ctx: Context, config: Config): Promise<string | u
  * @param config - 插件配置（cwd 指定 .dsh 根目录）
  */
 export async function apply(ctx: Context, config: Config) {
-  // 1. 启动时：挂载全局 .dsh 根 .mcp.json，并拿到 rootFile 供工作区去重。
-  const rootFile = await mountGlobalRoot(ctx, config)
+  // 1. 启动时：挂载全局 .dsh 根 .mcp.json，并拿到 rootFile（工作区去重）与明细（通知一并列出）。
+  const { rootFile, mounts } = await mountGlobalRoot(ctx, config)
 
   // 2. 注册 agent 生命周期监听：创建时自动挂载工作区 .mcp.json、销毁时清理。
-  registerAgentCreated(ctx, rootFile)
+  registerAgentCreated(ctx, rootFile, mounts)
   registerAgentDisposed(ctx)
 
   // 【已停用】首个对话回合的审批询问（工作区 .mcp.json 现为自动挂载，不再询问）。

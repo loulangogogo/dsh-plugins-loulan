@@ -14,7 +14,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import { findMcpJson } from './discover.js'
 import { agentToken } from './server-name.js'
-import { mountFile } from './mount.js'
+import { mountFile, type MountedServer } from './mount.js'
+import { buildMountNotice, announceMountNotice } from './notify.js'
 
 /** 单个 agent 的挂载决定状态。 */
 export type AgentDecision = 'pending' | 'approved' | 'rejected'
@@ -100,6 +101,32 @@ export async function askForApproval(
 }
 
 /**
+ * 挂载工作区 .mcp.json 并在会话尚未开始时输出可见通知。
+ *
+ * 挂载失败/无成功服务、会话已有消息、或文案为空时不输出。
+ * mount 参数可注入桩，便于单测。
+ *
+ * @param agent - 目标 agent
+ * @param file - 工作区 .mcp.json 绝对路径
+ * @param globalMounts - 全局 .dsh 根已挂载的服务明细（用于一并列出）
+ * @param mount - 挂载实现（默认 mountFile）
+ */
+export async function mountAndNotify(
+  agent: Agent,
+  file: string,
+  globalMounts: MountedServer[],
+  mount: (ctx: Context, file: string, suffix?: string) => Promise<MountedServer[]> = mountFile,
+): Promise<void> {
+  const work = await mount(agent.ctx, file, agentToken(agent.id))
+  if (work.length === 0) return
+  // 会话已经开始对话则不再输出（防 resume 重复、防迟到打断）。
+  if (agent.session.surface.nodes.length !== 0) return
+  const text = buildMountNotice(globalMounts, work)
+  if (text === undefined) return
+  announceMountNotice(agent, text, `已自动挂载 ${work.length} 个 MCP 服务`)
+}
+
+/**
  * 注册 agent/created 监听：探测工作区 .mcp.json，命中即自动挂载（不询问）。
  *
  * 与全局 .dsh 根命中同一文件（rootFile）则跳过，避免重复挂载。
@@ -108,17 +135,20 @@ export async function askForApproval(
  *
  * @param ctx - 插件上下文
  * @param rootFile - 全局 .dsh 根的 .mcp.json 路径（命中则跳过，避免与全局重复）
+ * @param globalMounts - 全局 .dsh 根已挂载的服务明细（用于通知一并列出）
  */
-export function registerAgentCreated(ctx: Context, rootFile: string | undefined): void {
+export function registerAgentCreated(ctx: Context, rootFile: string | undefined, globalMounts: MountedServer[]): void {
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     if (file === undefined || file === rootFile) return
 
-    // 当前实现：发现工作区 .mcp.json 即自动挂载（serverName 追加 agent 唯一后缀）。
+    // 当前实现：发现工作区 .mcp.json 即自动挂载，并在会话未开始时注入可见通知。
     console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
-    void mountFile(agent.ctx, file, agentToken(agent.id))
+    void mountAndNotify(agent, file, globalMounts).catch((error: unknown) => {
+      console.error(`[dsh-loulan-mcp] 工作区 ${cwd} 挂载/通知失败:`, error)
+    })
 
     // === 旧实现（登记"待决定"，配合 agent/request 审批询问后挂载），已停用，保留供恢复 ===
     // console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
