@@ -14,6 +14,9 @@ import { registerAgentCreated, registerAgentDisposed } from './approval.js'
 
 export { name, Config }
 
+/** 声明对工具注册表服务（tools）的依赖：挂载完成后需访问 ctx.tools 枚举各 server 的工具名。 */
+export const inject = ['tools']
+
 /**
  * 挂载 .dsh 根目录的全局 .mcp.json（所有 agent 共享，不询问）。
  *
