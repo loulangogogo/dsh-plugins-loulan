@@ -55,6 +55,9 @@ function renderGroup(
   )
 }
 
+/** 视图根容器的内边距：百分比 padding 以包含块宽度为基准，四边均为整体宽度的 1%。 */
+const ROOT_STYLE = { padding: '1%' } as const
+
 /**
  * 渲染「MCP」视图。
  *
@@ -66,11 +69,11 @@ export function McpView({ useMcp, t }: McpViewProps) {
   // 尚未取得快照，或两组服务皆空时，都显示空态文案
   if (snapshot === null
     || (snapshot.workspace.servers.length === 0 && snapshot.global.servers.length === 0)) {
-    return <div>{t('empty')}</div>
+    return <div style={ROOT_STYLE}>{t('empty')}</div>
   }
   const toolsUnavailable = t('tools.unavailable')
   return (
-    <div>
+    <div style={ROOT_STYLE}>
       {renderGroup(t('group.workspace'), snapshot.workspace, t('source'), toolsUnavailable)}
       {renderGroup(t('group.global'), snapshot.global, t('source'), toolsUnavailable)}
     </div>
