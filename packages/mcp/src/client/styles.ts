@@ -7,6 +7,11 @@
  *
  * 颜色一律使用语义 token：浅色主题下 `--dsw-alias-bg-layer-1/2/3` 与页面底色同值，
  * 卡片表面必须用 `--dsw-specific-tip`（两种主题下均为抬升表面，见 TodoPanel 的用法）。
+ *
+ * 版式来自 example/mcp.html 里定稿的三个选择：
+ * - 顶部用「视图头部」：标题 + 计数在左，图标操作在右（默认无边框，hover/聚焦才浮出）；
+ * - 工具名默认折到 2 行，真实溢出时由组件给出「展开／收起」；
+ * - 服务行保留有底色卡片。
  */
 
 /** 样式表标记：用于幂等注入与排查。 */
@@ -18,51 +23,99 @@ const CSS = `
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 20px;
   /* 页边距：百分比 padding 以包含块宽度为基准，四边均为整体宽度的 1% */
   padding: 1%;
 }
 
-.dsh-mcp-toolbar {
+/* 视图头部：左侧标题 + 计数，右侧图标操作 */
+.dsh-mcp-header {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dsh-mcp-heading {
+  display: flex;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
 
-.dsh-mcp-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: 8px;
-  background: var(--dsw-specific-tip);
+.dsh-mcp-heading-title {
+  font-size: 13px;
+  line-height: 24px;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
+}
+
+.dsh-mcp-count {
   font-size: 12px;
   line-height: 20px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.dsh-mcp-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 图标按钮：默认无边框、无底色；仅 hover / 聚焦时浮出，减少视觉重量 */
+.dsh-mcp-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
-.dsh-mcp-button:hover:not(:disabled) {
-  border-color: var(--dsw-alias-border-l2);
+.dsh-mcp-icon-button:hover:not(:disabled) {
+  background: var(--dsw-specific-tip);
+  color: var(--dsw-alias-label-primary);
 }
 
-.dsh-mcp-button:disabled {
-  color: var(--dsw-alias-label-tertiary);
+.dsh-mcp-icon-button:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.dsh-mcp-icon-button:disabled {
+  color: var(--dsw-alias-label-caption);
   cursor: default;
 }
 
-/* 文件选择器只作为「添加」按钮的隐藏入口：点击 label 即打开系统选文件对话框 */
-.dsh-mcp-file {
-  display: none;
+.dsh-mcp-icon-button svg {
+  width: 15px;
+  height: 15px;
 }
 
-.dsh-mcp-status {
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-tertiary);
+/* 处理中：刷新图标转圈（尊重 prefers-reduced-motion，改为慢速） */
+@keyframes dsh-mcp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.dsh-mcp-spin {
+  animation: dsh-mcp-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh-mcp-spin { animation-duration: 3s; }
+}
+
+/* 文件选择器只作为「添加」入口的隐藏实现：点击图标按钮即打开系统选文件对话框 */
+.dsh-mcp-file {
+  display: none;
 }
 
 .dsh-mcp-error {
@@ -173,6 +226,46 @@ const CSS = `
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
+}
+
+/* 工具名一行容器：文字在左，「展开／收起」贴右下角 */
+.dsh-mcp-tools-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 折到 2 行；仅在真实溢出时由组件挂上（不足 2 行不会被裁切） */
+.dsh-mcp-tools-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.dsh-mcp-tools-toggle {
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dsh-mcp-tools-toggle:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dsh-mcp-tools-toggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
 }
 
 .dsh-mcp-empty {

@@ -20,8 +20,10 @@ export const NS = 'dsh-loulan-mcp'
 export const zh = {
   'view.mcp': 'MCP',
   'empty': '本会话未加载 MCP 服务',
+  'heading': 'MCP 服务',
+  'heading.count': '{count} 个',
   'toolbar.refresh': '刷新',
-  'toolbar.add': '添加',
+  'toolbar.add': '添加 .mcp.json',
   'toolbar.busy': '处理中…',
   'group.workspace': '本工作区',
   'group.manual': '手动添加',
@@ -29,6 +31,8 @@ export const zh = {
   'source': '来源',
   'tools.unavailable': '工具列表暂不可用',
   'tools.separator': '、',
+  'tools.expand': '展开',
+  'tools.collapse': '收起',
   'error.refreshFailed': '刷新失败',
   'error.addFailed': '添加失败',
 } as const
@@ -40,8 +44,10 @@ export type McpKey = keyof typeof zh
 export const en: Record<McpKey, string> = {
   'view.mcp': 'MCP',
   'empty': 'No MCP servers loaded in this session',
+  'heading': 'MCP servers',
+  'heading.count': '{count} loaded',
   'toolbar.refresh': 'Refresh',
-  'toolbar.add': 'Add',
+  'toolbar.add': 'Add .mcp.json',
   'toolbar.busy': 'Working…',
   'group.workspace': 'This workspace',
   'group.manual': 'Manually added',
@@ -49,6 +55,8 @@ export const en: Record<McpKey, string> = {
   'source': 'Source',
   'tools.unavailable': 'Tool list unavailable',
   'tools.separator': ', ',
+  'tools.expand': 'Expand',
+  'tools.collapse': 'Collapse',
   'error.refreshFailed': 'Refresh failed',
   'error.addFailed': 'Add failed',
 }
