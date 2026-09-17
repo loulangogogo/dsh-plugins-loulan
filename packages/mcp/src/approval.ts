@@ -129,10 +129,11 @@ export async function mountAndRecord(
 }
 
 /**
- * 注册 agent/created 监听：探测工作区 .mcp.json，命中即挂载并写入运行时记录。
+ * 注册 agent/created 监听：探测工作区 .mcp.json，**一律登记**该会话并挂载命中项。
  *
- * 即使工作区没有 .mcp.json，只要存在全局共享服务也写入一次，
- * 以保证端点在任何会话都能反映当前加载情况。
+ * 即使工作区没有 .mcp.json、此刻也没有任何全局服务，也必须留下会话记录：
+ * 载荷在读取时现算，登记时为空不影响后续显示；反之若跳过登记，该会话的
+ * 刷新/添加会一律报「会话未加载 MCP 服务」（且切走再切回也不会自愈）。
  *
  * @param ctx - 插件上下文
  * @param rootFile - 全局 .dsh 根的 .mcp.json 路径（命中则跳过工作区挂载）
@@ -148,7 +149,6 @@ export function registerAgentCreated(
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     const workFile = file === undefined || file === rootFile ? undefined : file
-    if (workFile === undefined && runtime.globalGroup().servers.length === 0) return
     if (workFile !== undefined) {
       console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
     }

@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   decisionFor,
   setDecision,
@@ -8,6 +11,7 @@ import {
   setPending,
   clearPending,
   askForApproval,
+  registerAgentCreated,
 } from '../src/approval.js'
 import { mountAndRecord } from '../src/approval.js'
 import type { MountedHandle, MountedServer } from '../src/mount.js'
@@ -167,4 +171,33 @@ test('mountAndRecord 挂载结果为空时不输出卡片', async () => {
   const runtime = fakeRuntime()
   await mountAndRecord(fakeAgent(appends), '/x/.mcp.json', runtime, async () => [])
   assert.equal(appends.length, 0)
+})
+
+test('registerAgentCreated 对「无工作区文件且全局为空」的会话也登记', async () => {
+  let onCreated: ((payload: { agent: unknown }) => void) | undefined
+  const ctx = {
+    on: (name: string, handler: (payload: { agent: unknown }) => void) => {
+      if (name === 'agent/created') onCreated = handler
+    },
+  } as unknown as Parameters<typeof registerAgentCreated>[0]
+
+  const tracked: string[] = []
+  const runtime = fakeRuntime({ track: agent => { tracked.push(agent.id) } })
+  registerAgentCreated(ctx, undefined, runtime)
+  assert.ok(onCreated !== undefined)
+
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const agent = {
+      id: 'a1',
+      ctx: {},
+      session: { header: { cwd: dir }, surface: { nodes: [] }, append: () => {} },
+    } as unknown as Parameters<typeof mountAndRecord>[0]
+    onCreated({ agent })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    // 无工作区文件 + 全局为空：仍须登记，否则刷新/添加会报「会话未加载 MCP 服务」。
+    assert.deepEqual(tracked, ['a1'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

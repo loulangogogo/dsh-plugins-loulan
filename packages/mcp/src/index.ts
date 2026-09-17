@@ -43,12 +43,14 @@ export async function apply(ctx: Context, config: Config) {
     scope.effect(() => () => { listAgents = () => [] }, 'dsh-loulan-mcp: agents probe')
   })
 
-  // 1. 启动时：挂载全局 .dsh 根 .mcp.json；运行时记录句柄，并持有「重新发现全局文件」的解析函数。
+  // 1. 同步阶段：确定全局根、建运行时，并**先**订阅生命周期与端点。
+  //    全局挂载会 await MCP 子进程启动（stdio 服务握手，可能数秒）；若放在订阅之前，
+  //    这段时间内创建的 agent 会漏掉 agent/created 而永不登记（其刷新/添加随即报错）。
   const rootStart = config.cwd || dshHome()
   const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => findMcpJson(rootStart), listAgents })
   const rootFile = findMcpJson(rootStart)
-  const handles = rootFile ? await mountFile(ctx, rootFile) : []
-  runtime.seedGlobal(handles)
+  registerAgentCreated(ctx, rootFile, runtime)
+  registerAgentDisposed(ctx, runtime)
 
   // 2. 可选：仅提供 webServer 的 profile（Web）才注册端点；
   //    缺失时挂载照常，只是没有「MCP」标签页的数据来源。
@@ -63,9 +65,9 @@ export async function apply(ctx: Context, config: Config) {
     )
   })
 
-  // 3. 注册 agent 生命周期监听：创建时自动挂载工作区 .mcp.json 并记入运行时、销毁时清理。
-  registerAgentCreated(ctx, rootFile, runtime)
-  registerAgentDisposed(ctx, runtime)
+  // 3. 最后才挂全局 .dsh 根 .mcp.json：载荷读取时现算，全局晚挂上不影响已登记的会话。
+  const handles = rootFile ? await mountFile(ctx, rootFile) : []
+  runtime.seedGlobal(handles)
 
   // 【已停用】首个对话回合的审批询问（工作区 .mcp.json 现为自动挂载，不再询问）。
   // 如需恢复「询问后挂载」模式：取消下行注释，并在上方 import 中补回 registerAgentRequest，
