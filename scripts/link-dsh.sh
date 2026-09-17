@@ -57,6 +57,7 @@ declare -a PACKAGES=(
   "dsh-client-ui-slots:packages/client/ui-slots"
   "dsh-client-ui-conversation:packages/client/ui-conversation"
   "dsh-client-ui-renderer:packages/client/ui-renderer"
+  "dsh-host-webserver:packages/host/webserver"
 )
 
 # 逐包建立软链；缺失的包告警跳过，不中断整体流程。
