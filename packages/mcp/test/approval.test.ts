@@ -49,7 +49,6 @@ function fakeRuntime(over: Partial<MountsRuntime> = {}): MountsRuntime {
   return {
     seedGlobal: () => {},
     globalGroup: () => ({ servers: [] }),
-    globalServers: () => [],
     track: () => {},
     forget: () => {},
     read: () => ({ global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] } }),
@@ -61,18 +60,17 @@ function fakeRuntime(over: Partial<MountsRuntime> = {}): MountsRuntime {
 }
 
 /**
- * 构造 agent 桩：收集 session.append 事件。
+ * 构造 agent 桩：收集 session.append 事件（通知卡片移除后，挂载不得再写任何事件）。
  *
  * @param appends - 事件收集数组
- * @param nodes - surface.nodes（非空表示会话已有消息）
  * @returns agent 桩
  */
-function fakeAgent(appends: unknown[], nodes: unknown[] = []) {
+function fakeAgent(appends: unknown[]) {
   return {
     id: 'a1',
     ctx: {},
     session: {
-      surface: { nodes },
+      surface: { nodes: [] },
       append: (type: unknown, data: unknown) => { appends.push([type, data]) },
     },
   } as unknown as Parameters<typeof mountAndRecord>[0]
@@ -120,39 +118,21 @@ test('askForApproval request 抛错返回 rejected', async () => {
   assert.equal(d, 'rejected')
 })
 
-test('mountAndRecord 记录句柄并在会话空时输出通知卡片（含全局服务）', async () => {
+test('mountAndRecord 挂载并记录句柄，且不向会话日志写事件', async () => {
   const appends: unknown[] = []
   const tracked: Array<{ file: string | undefined; handles: MountedHandle[] }> = []
-  const runtime = fakeRuntime({
-    track: (_agent, file, handles) => { tracked.push({ file, handles }) },
-    globalServers: () => [srv({ serverName: 'g', rawName: 'g', file: '/home/me/.dsh/.mcp.json', tools: [] })],
-  })
+  const runtime = fakeRuntime({ track: (_agent, file, handles) => { tracked.push({ file, handles }) } })
   const work = [handle()]
   await mountAndRecord(fakeAgent(appends), '/x/.mcp.json', runtime, async () => work)
 
   assert.equal(tracked.length, 1)
   assert.equal(tracked[0]?.file, '/x/.mcp.json')
   assert.deepEqual(tracked[0]?.handles, work)
-  assert.equal(appends.length, 2)
-  assert.equal((appends[0] as unknown[])[0], 'command/run')
-  assert.equal((appends[1] as unknown[])[0], 'command/done')
-  // 通知文案含全局服务，说明卡片读的是 runtime.globalServers()。
-  const done = (appends[1] as unknown[])[1] as { text: string }
-  assert.ok(done.text.includes('另共享全局服务'))
+  // 通知卡片已移除：挂载全程静默，不追加任何 command 事件。
+  assert.deepEqual(appends, [])
 })
 
-test('mountAndRecord 会话已有消息时仍记录但不输出卡片', async () => {
-  const appends: unknown[] = []
-  const tracked: Array<MountedHandle[]> = []
-  const runtime = fakeRuntime({ track: (_agent, _file, handles) => { tracked.push(handles) } })
-  await mountAndRecord(fakeAgent(appends, [1]), '/x/.mcp.json', runtime, async () => [handle()])
-
-  assert.equal(tracked.length, 1)
-  assert.equal(tracked[0]?.length, 1)
-  assert.equal(appends.length, 0)
-})
-
-test('mountAndRecord 无工作区文件时记录空句柄且不挂载、不提示', async () => {
+test('mountAndRecord 无工作区文件时记录空句柄且不挂载', async () => {
   const appends: unknown[] = []
   const tracked: Array<{ file: string | undefined; handles: MountedHandle[] }> = []
   const runtime = fakeRuntime({ track: (_agent, file, handles) => { tracked.push({ file, handles }) } })
@@ -163,14 +143,7 @@ test('mountAndRecord 无工作区文件时记录空句柄且不挂载、不提�
   assert.equal(tracked.length, 1)
   assert.equal(tracked[0]?.file, undefined)
   assert.equal(tracked[0]?.handles.length, 0)
-  assert.equal(appends.length, 0)
-})
-
-test('mountAndRecord 挂载结果为空时不输出卡片', async () => {
-  const appends: unknown[] = []
-  const runtime = fakeRuntime()
-  await mountAndRecord(fakeAgent(appends), '/x/.mcp.json', runtime, async () => [])
-  assert.equal(appends.length, 0)
+  assert.deepEqual(appends, [])
 })
 
 test('registerAgentCreated 对「无工作区文件且全局为空」的会话也登记', async () => {

@@ -127,7 +127,6 @@ test('runtime 未跟踪会话只返回全局分组', () => {
   assert.deepEqual(data.workspace.servers, [])
   assert.deepEqual(data.manual.servers, [])
   assert.equal(runtime.globalGroup().servers[0]?.name, 'g')
-  assert.equal(runtime.globalServers()[0]?.serverName, 'g')
 })
 
 test('runtime track 后 read 给出该会话三组载荷，forget 后清空', () => {
@@ -246,12 +245,11 @@ test('runtime refresh 全局文件缺失时卸载全部全局服务，重新出�
     assert.equal((await runtime.refresh('s1')).ok, true)
     assert.equal(fibers.length, 1)
 
-    // 文件消失视为配置清空：释放全部全局句柄，三处视图同步清空。
+    // 文件消失视为配置清空：释放全部全局句柄，视图载荷同步清空。
     path = undefined
     assert.equal((await runtime.refresh('s1')).ok, true)
     assert.equal(fibers[0]?.disposed, true)
     assert.deepEqual(runtime.globalGroup().servers, [])
-    assert.deepEqual(runtime.globalServers(), [])
     assert.deepEqual(runtime.read('s1').global.servers, [])
 
     // 文件重新出现：按新内容挂回（含新增的 b）。

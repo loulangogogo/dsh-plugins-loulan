@@ -14,9 +14,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import { findMcpJson } from './discover.js'
 import { agentToken } from './server-name.js'
-import { mountFile, handlesToServers, type MountedHandle } from './mount.js'
+import { mountFile, type MountedHandle } from './mount.js'
 import type { MountsRuntime } from './mounts.js'
-import { buildMountNotice, announceMountNotice } from './notify.js'
 
 /** 单个 agent 的挂载决定状态。 */
 export type AgentDecision = 'pending' | 'approved' | 'rejected'
@@ -102,13 +101,13 @@ export async function askForApproval(
 }
 
 /**
- * 挂载工作区 .mcp.json，写入运行时记录，并在新建会话时输出通知卡片。
+ * 挂载工作区 .mcp.json 并写入运行时记录。
  *
- * 运行时记录供 HTTP 端点读取；卡片条件保持原样（有工作区挂载且会话尚无消息）。
+ * 全程静默：不向会话日志追加事件、不产生通知卡片；运行时记录供 HTTP 端点读取。
  *
  * @param agent - 目标 agent
  * @param file - 工作区 .mcp.json 绝对路径；无则为 undefined
- * @param runtime - 挂载运行时（记录句柄并读出全局明细）
+ * @param runtime - 挂载运行时（记录句柄）
  * @param mount - 挂载实现（默认 mountFile），可注入桩
  */
 export async function mountAndRecord(
@@ -119,13 +118,6 @@ export async function mountAndRecord(
 ): Promise<void> {
   const handles = file === undefined ? [] : await mount(agent.ctx, file, agentToken(agent.id))
   runtime.track(agent, file, handles)
-
-  const work = handlesToServers(handles)
-  if (work.length === 0) return
-  if (agent.session.surface.nodes.length !== 0) return
-  const text = buildMountNotice(runtime.globalServers(), work)
-  if (text === undefined) return
-  announceMountNotice(agent, text)
 }
 
 /**

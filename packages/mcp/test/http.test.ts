@@ -39,7 +39,6 @@ function fakeRuntime(
   const runtime: MountsRuntime = {
     seedGlobal: () => {},
     globalGroup: () => globalGroup,
-    globalServers: () => [],
     track: () => {},
     forget: () => {},
     read: (sessionId) => {

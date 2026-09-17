@@ -85,12 +85,6 @@ export interface MountsRuntime {
    */
   globalGroup(): McpMountGroup
   /**
-   * 读取当前全局共享服务的挂载明细（内部用：通知卡片）。
-   *
-   * @returns 全局服务明细数组
-   */
-  globalServers(): MountedServer[]
-  /**
    * 记录某会话的工作区挂载句柄。
    *
    * @param agent - 该会话的 agent（刷新时需要其 ctx 与工作区目录）
@@ -369,7 +363,6 @@ export function createMountsRuntime(options: {
       for (const handle of handles) globalHandles.set(handle.mounted.serverName, handle)
     },
     globalGroup: () => toMountGroup(globalServers()),
-    globalServers,
     track: (agent, workspaceFile, handles) => {
       sessions.set(agent.id, { agent, workspaceFile, workspaceHandles: handles, uploads: [], uploadHandles: [] })
     },
