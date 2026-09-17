@@ -90,10 +90,12 @@ dsh plugin --profile web add dsh-loulan-mcp
 - **去重**：工作区与 `.dsh` 根命中同一个 `.mcp.json` 文件时，跳过工作区挂载（避免重复）。
 - **超时**：单次工具调用默认 60 秒。
 - **依赖版本**：本插件依赖 `@deepseek-ai/dsh-mcp-client`，其版本须与 DSH 运行时一致，否则可能出现两份 mcp-client 导致工具注册冲突。
+- **发布前必须构建**：`lib/` 不入库，且 `dsh.client` 声明与 `lib/client.js` 必须共存；已配置 `prepack` 自动触发 `build`，若绕过脚本手工打包，须先构建，否则声明存在而产物缺失会让 Web 启动失败。
+- **只读端点无鉴权**：`/dsh-loulan-mcp/mounts` 返回本机 `.mcp.json` 路径与工具名，不做身份校验（仅按 `sec-fetch-site` 拒绝跨站浏览器请求），因此仅适用于 localhost 绑定的部署。
 
 ## 开发与测试
 
-- 源码按业务功能拆分于 `packages/mcp/src/`：`index.ts`（编排）、`config.ts`、`discover.ts`、`parse.ts`、`server-name.ts`、`mount.ts`、`approval.ts`。
+- 源码按业务功能拆分于 `packages/mcp/src/`：`index.ts`（编排）、`config.ts`、`discover.ts`、`parse.ts`、`server-name.ts`、`mount.ts`、`contract.ts`（数据契约与路由常量）、`registry.ts`（会话注册表）、`http.ts`（只读端点）、`approval.ts`；浏览器半侧见 `packages/mcp/src/client/`（`index.ts`、`mcp-source.ts`、`McpView.tsx`、`locales.ts`）。
 - 单元测试位于 `packages/mcp/test/`，用 `node:test` + `tsx` 运行：
   ```sh
   pnpm --filter dsh-loulan-mcp test
@@ -102,8 +104,8 @@ dsh plugin --profile web add dsh-loulan-mcp
 - 构建：`pnpm --filter dsh-loulan-mcp build`，产物输出到 `lib/`。
 - 浏览器半侧位于 `packages/mcp/src/client/`，用 `node scripts/build-client.mjs`（esbuild）打包为 `lib/client.js`（harness 客户端模块系统约定的 closure-factory CJS）。
 - `package.json` 的 `dsh.client` 声明与 `lib/client.js` 必须同时存在：只声明不构建会让 Web 启动时报错。
-- 客户端代码改动后需重新构建并刷新页面；软链被 `pnpm install` 清掉后需重跑 `bash scripts/link-dsh.sh`。
-- Host 侧通过 `ctx.webServer` 注册只读端点（`inject: ['tools', 'webServer']`）；数据仅在当前进程运行期内有效。
+- 客户端代码改动后需重新构建并刷新页面；软链被 `pnpm install` 清掉后需在**仓库根**重跑 `bash scripts/link-dsh.sh`。
+- Host 侧通过**可选的** `ctx.webServer` 注册只读端点（`inject: ['tools']`，在 `ctx.inject(['webServer'])` 回调内注册；非 Web profile 自动跳过，挂载不受影响）；数据仅在当前进程运行期内有效。
 - 发布：`package.json` 的 `files` 包含整个 `lib/` 目录与 `cordis.patch.yml`，确保拆分的全部模块随包发布。
 
 ## 常见问题

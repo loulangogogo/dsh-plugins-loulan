@@ -2,7 +2,7 @@
 /**
  * 构建 dsh-loulan-mcp 的浏览器半侧 bundle。
  *
- * 不复用 harness 的 tsdown preset：它按 harness workspace（packages/*​/*）查找包
+ * 不复用 harness 的 tsdown preset：它按 harness workspace 的两级包目录查找包
  * manifest，本仓库不在其中。这里用 esbuild 直接产出 harness 客户端模块系统约定的
  * closure-factory CJS 产物。
  */

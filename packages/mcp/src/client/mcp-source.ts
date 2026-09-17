@@ -60,7 +60,10 @@ export function normalizeMounts(raw: unknown): McpSnapshot {
 }
 
 /**
- * 创建某会话的挂载快照源：初次订阅时拉取一次并发布，失败保持空态。
+ * 创建某会话的挂载快照源：初次订阅时拉取一次并发布，失败保持空态且可重试。
+ *
+ * 拉取失败或「工作区为空但全局非空」（挂载尚未写入注册表的中间态）都不锁死，
+ * 后续订阅（如标签页切回）会再次拉取，避免会话永久停在缺工作区分组的空态。
  *
  * @param sessionId - 会话 id
  * @param fetchMounts - 拉取函数（默认由 apply 注入的真实 fetch）
@@ -82,11 +85,21 @@ export function createMountSource(
         void fetchMounts(sessionId).then(
           (payload) => {
             const normalized = normalizeMounts(payload)
-            if (normalized === null) return
+            if (normalized === null) {
+              started = false
+              return
+            }
             snapshot = normalized
+            // 工作区分组可能因挂载尚未完成而缺失：允许后续订阅再拉一次。
+            if (normalized.workspace.servers.length === 0 && normalized.global.servers.length > 0) {
+              started = false
+            }
             for (const notify of listeners) notify()
           },
-          () => { /* 保持空态：端点不可达或返回错误 */ },
+          () => {
+            // 失败不锁死：下次订阅（如标签页切回）会重新拉取。
+            started = false
+          },
         )
       }
       return () => { listeners.delete(listener) }

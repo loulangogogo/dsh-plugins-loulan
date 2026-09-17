@@ -40,3 +40,35 @@ test('数据源拉取失败保持空态且不抛', async () => {
   await new Promise(resolve => setTimeout(resolve, 0))
   assert.equal(source.getSnapshot(), null)
 })
+
+test('数据源拉取失败后可重试', async () => {
+  let calls = 0
+  const source = createMountSource('s1', async () => {
+    calls += 1
+    if (calls === 1) throw new Error('boom')
+    return raw
+  })
+  source.subscribe(() => {})
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(source.getSnapshot(), null)
+  source.subscribe(() => {})
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(calls, 2)
+  assert.deepEqual(source.getSnapshot(), raw)
+})
+
+test('数据源工作区为空但全局非空时可重拉', async () => {
+  const globalOnly = { global: { servers: [{ name: 'g', transport: 'stdio', tools: [] }] }, workspace: { servers: [] } }
+  let calls = 0
+  const source = createMountSource('s1', async () => {
+    calls += 1
+    return calls === 1 ? globalOnly : raw
+  })
+  source.subscribe(() => {})
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.deepEqual(source.getSnapshot(), globalOnly)
+  source.subscribe(() => {})
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(calls, 2)
+  assert.deepEqual(source.getSnapshot(), raw)
+})

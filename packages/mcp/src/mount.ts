@@ -7,7 +7,7 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 // 副作用类型导入:把 ctx.tools 声明合并到 Context 上(工具注册表类型)。
 import type {} from '@deepseek-ai/dsh-tools'
 import { dirname } from 'node:path'
-import type { McpMountGroup, McpMountedData, McpServerEntry } from './contract.js'
+import type { McpMountGroup, McpMountedData, McpServerEntry, McpTransport } from './contract.js'
 import { readMcpServers } from './parse.js'
 import { mapServer } from './server-name.js'
 
@@ -18,7 +18,7 @@ export interface MountedServer {
   /** .mcp.json 中的原始服务名(不含 agent 唯一后缀),供通知展示。 */
   rawName: string
   /** 传输方式:stdio 子进程或 streamable-http 远程服务。 */
-  transport: 'stdio' | 'streamable-http'
+  transport: McpTransport
   /** 来源 .mcp.json 文件绝对路径。 */
   file: string
   /** 该 server 暴露给模型的工具名(去掉了 mcp__<serverName>__ 前缀)。 */

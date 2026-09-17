@@ -28,6 +28,21 @@ export function mountResponse(
 }
 
 /**
+ * 判断请求是否来自同源页面。
+ *
+ * 浏览器同源请求带 `sec-fetch-site: same-origin`，直接地址栏访问为 `none`；
+ * 非浏览器客户端（如 curl）不带该头，按放行处理。
+ *
+ * @param req - Node 请求
+ * @returns 是否为可接受的调用方
+ */
+function isSameOriginRequest(req: IncomingMessage): boolean {
+  const site = req.headers?.['sec-fetch-site']
+  if (typeof site !== 'string') return true
+  return site === 'same-origin' || site === 'none'
+}
+
+/**
  * 创建端点处理器：仅接受 GET，返回 JSON，禁止缓存。
  *
  * @param registry - 进程内注册表
@@ -39,6 +54,11 @@ export function createMountsHandler(
   global: McpMountGroup,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
+    if (!isSameOriginRequest(req)) {
+      res.statusCode = 403
+      res.end()
+      return
+    }
     if (req.method !== 'GET') {
       res.statusCode = 405
       res.end()

@@ -55,6 +55,18 @@ test('handler 对非 GET 返回 405 且无响应体', () => {
   assert.equal(res.body, '')
 })
 
+test('handler 对跨站 GET 返回 403 且无响应体', () => {
+  const registry = createMountRegistry()
+  const handler = createMountsHandler(registry, globalGroup)
+  const res = fakeRes()
+  handler(
+    { method: 'GET', url: '/dsh-loulan-mcp/mounts', headers: { 'sec-fetch-site': 'cross-site' } } as never,
+    res as never,
+  )
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body, '')
+})
+
 test('handler 返回 JSON、禁止缓存并按 sessionId 取数', () => {
   const registry = createMountRegistry()
   registry.set('s1', work)
