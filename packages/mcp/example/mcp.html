@@ -344,23 +344,26 @@ body {
 }
 
 /* 卸载：默认与「来源」同色的弱按钮；进入确认态才用警示色 */
+/* 卸载：红色垃圾桶图标按钮（无文字）；破坏性操作由 Modal 二次确认 */
 .dsh-mcp-unload {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font: inherit;
-  font-size: 12px;
-  line-height: 20px;
-  white-space: nowrap;
+  color: var(--dsw-alias-state-error-primary);
   cursor: pointer;
 }
 
-.dsh-mcp-unload:hover:not(:disabled) { color: var(--dsw-alias-label-secondary); }
-.dsh-mcp-unload[data-confirm="true"] { color: var(--dsw-alias-state-error-primary); font-weight: 500; }
-.dsh-mcp-unload:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.dsh-mcp-unload:hover:not(:disabled) { background: var(--dsw-specific-tip); }
+.dsh-mcp-unload:disabled { color: var(--dsw-alias-label-caption); cursor: default; }
+.dsh-mcp-unload:focus-visible { outline: 2px solid var(--dsw-alias-state-error-primary); outline-offset: 1px; }
+.dsh-mcp-unload svg { width: 15px; height: 15px; }
 
 .dsh-mcp-list {
   display: flex;
@@ -553,7 +556,8 @@ body {
   上方标签条由 harness 提供、不由本插件控制，此处仅示意上下文。
   三个工具的差别：<code>A</code> 两个文字按钮平铺；<code>B</code> 标题 + 计数在左、图标操作在右；
   <code>C</code> 在 B 基础上把「添加」改成列表末尾的虚线行。
-  分组标题右侧的「卸载」按钮为纯展示（演示页没有宿主），全局共享刻意不给入口。
+  分组标题右侧的红色垃圾桶图标为「卸载」入口（点开为确认弹框）；演示页没有宿主，确认后不产生实际效果，
+  且弹框是对 harness <code>ui-primitives</code> 的 <code>Modal</code> 的近似。全局共享刻意不给入口。
 </footer>
 
 <script>
@@ -643,7 +647,11 @@ const T = {
   expand: '展开',
   collapse: '收起',
   unload: '卸载',
-  unloadConfirm: '确认卸载',
+  unloadTitle: '确认卸载',
+  unloadWorkspace: '将卸载「本工作区」的 MCP 服务。刷新后会重新读取 .mcp.json 并挂回。',
+  unloadManual: '将卸载「手动添加」的 MCP 服务，并清除已上传的内容。刷新不会带回。',
+  unloadConfirm: '卸载',
+  unloadCancel: '取消',
 };
 
 /** 传输方式对应的 pill 类名（对应 McpView.tsx 的 TRANSPORT_CLASS）。 */
@@ -657,6 +665,7 @@ const ICON = {
   refresh: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8a5.4 5.4 0 1 0-1.6 3.9"/><path d="M13.4 3.6v4h-4"/></svg>',
   refreshSpin: '<svg class="dsh-mcp-spin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="5.4" opacity="0.25"/><path d="M13.4 8a5.4 5.4 0 0 0-4-5.2"/></svg>',
   plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.4v9.2M3.4 8h9.2"/></svg>',
+  trash: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M14.4782 4.84067L14.2138 10.1152C14.1102 12.1872 14.067 13.0115 13.3866 13.9607C13.1044 14.3546 12.7498 14.6912 12.3424 14.9535C11.8239 15.2872 11.2415 15.4316 10.5585 15.4998C9.88727 15.5668 9.04946 15.5656 7.99998 15.5656C6.95051 15.5656 6.1127 15.5668 5.44142 15.4998C4.75851 15.4316 4.17602 15.2872 3.65753 14.9535C3.25012 14.6912 2.89559 14.3546 2.61332 13.9607C1.93296 13.0115 1.88979 12.1872 1.78619 10.1152L1.52179 4.84067L2.89006 4.77277L3.15343 10.0463C3.26221 12.2218 3.32452 12.6015 3.72646 13.1624C3.90825 13.4161 4.13686 13.6334 4.39927 13.8023C4.66204 13.9714 5.00263 14.0792 5.57825 14.1367C6.16562 14.1953 6.92298 14.1963 7.99998 14.1963C9.07699 14.1963 9.83434 14.1953 10.4217 14.1367C10.9973 14.0792 11.3379 13.9714 11.6007 13.8023C11.8631 13.6334 12.0917 13.4161 12.2735 13.1624C12.6755 12.6015 12.7378 12.2218 12.8465 10.0463L13.1099 4.77277L14.4782 4.84067ZM5.43011 6.22849H6.7994V11.3909H5.43011V6.22849ZM9.20056 6.22849H10.5699V11.3909H9.20056V6.22849ZM8.53597 0.434431C9.17976 0.434431 9.6522 0.426926 10.0966 0.571258C10.2357 0.616451 10.3717 0.672554 10.502 0.738948C10.9182 0.951107 11.2464 1.29099 11.7015 1.74612L12.4978 2.54136H15.3742V3.91169H0.625732V2.54136H3.50218L4.29845 1.74612C4.75358 1.29099 5.08174 0.951107 5.49801 0.738948C5.62831 0.672554 5.76425 0.616451 5.90334 0.571258C6.34776 0.426926 6.82021 0.434431 7.46399 0.434431H8.53597ZM7.46399 1.80476C6.73208 1.80476 6.51641 1.81187 6.32617 1.87369C6.25545 1.89667 6.18668 1.92533 6.12041 1.95907C5.96398 2.03878 5.82348 2.16253 5.44142 2.54136H10.5585C10.1765 2.16253 10.036 2.03878 9.87955 1.95907C9.81329 1.92533 9.74452 1.89667 9.6738 1.87369C9.48356 1.81187 9.26789 1.80476 8.53597 1.80476H7.46399Z" fill="currentColor"/></svg>',
 };
 
 /**
@@ -780,23 +789,60 @@ function refineToolRows(root) {
 }
 
 /**
- * 卸载按钮（纯展示）：第一次点击进入确认态，第二次才“卸”，失焦即取消。
+ * 演示用确认弹框（近似 harness ui-primitives 的 Modal：遮罩 + 居中卡片 + 取消/确认）。
  *
- * @returns {HTMLElement} 卸载按钮
+ * @param {{title: string, description: string, confirmLabel: string, cancelLabel: string, onConfirm: Function}} options - 弹框内容与确认回调
  */
-function unloadButton() {
-  const button = el('button', 'dsh-mcp-unload', T.unload);
+function confirmDialog(options) {
+  const mask = el('div', 'demo-mask');
+  const card = el('div', 'demo-modal');
+  card.append(el('div', 'demo-modal-title', options.title));
+  card.append(el('p', 'demo-modal-desc', options.description));
+
+  const actions = el('div', 'demo-modal-actions');
+  const cancel = el('button', 'demo-btn demo-btn-outline', options.cancelLabel);
+  cancel.type = 'button';
+  const confirm = el('button', 'demo-btn demo-btn-primary', options.confirmLabel);
+  confirm.type = 'button';
+  actions.append(cancel, confirm);
+  card.append(actions);
+  mask.append(card);
+
+  /** 关闭并解绑键盘监听。 */
+  const close = () => {
+    mask.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  /** Esc 关闭。 */
+  const onKey = (event) => { if (event.key === 'Escape') close() };
+
+  cancel.addEventListener('click', close);
+  confirm.addEventListener('click', () => { close(); options.onConfirm(); });
+  mask.addEventListener('click', (event) => { if (event.target === mask) close() });
+  document.addEventListener('keydown', onKey);
+  document.body.append(mask);
+}
+
+/**
+ * 卸载入口：红色垃圾桶图标按钮，点击弹出确认框（演示页没有宿主，确认后不产生实际效果）。
+ *
+ * @param {string} description - 该分组的卸载说明
+ * @returns {HTMLElement} 图标按钮
+ */
+function unloadButton(description) {
+  const button = el('button', 'dsh-mcp-unload');
   button.type = 'button';
-  button.dataset.confirm = 'false';
   button.title = T.unload;
+  button.setAttribute('aria-label', T.unload);
+  button.innerHTML = ICON.trash;
   button.addEventListener('click', () => {
-    const confirming = button.dataset.confirm === 'true';
-    button.dataset.confirm = confirming ? 'false' : 'true';
-    button.textContent = confirming ? T.unload : T.unloadConfirm;
-  });
-  button.addEventListener('blur', () => {
-    button.dataset.confirm = 'false';
-    button.textContent = T.unload;
+    confirmDialog({
+      title: T.unloadTitle,
+      description,
+      confirmLabel: T.unloadConfirm,
+      cancelLabel: T.unloadCancel,
+      onConfirm: () => {},
+    });
   });
   return button;
 }
@@ -806,16 +852,16 @@ function unloadButton() {
  *
  * @param {string} title - 分组标题
  * @param {{file?: string, servers: Array}} group - 分组数据
- * @param {boolean} unloadable - 是否可卸载（全局共享为 false，无入口）
+ * @param {string} [unloadDescription] - 该分组的卸载说明；缺省表示不可卸载（全局共享）
  * @returns {HTMLElement|null} 分组节点
  */
-function renderGroup(title, group, unloadable) {
+function renderGroup(title, group, unloadDescription) {
   if (group.servers.length === 0) return null;
   const section = el('section', 'dsh-mcp-group');
 
   const head = el('div', 'dsh-mcp-group-head');
   head.append(el('span', 'dsh-mcp-group-title', title));
-  if (group.file !== undefined || unloadable === true) {
+  if (group.file !== undefined || unloadDescription !== undefined) {
     const meta = el('span', 'dsh-mcp-group-meta');
     if (group.file !== undefined) {
       const source = el('span', 'dsh-mcp-group-source');
@@ -823,7 +869,7 @@ function renderGroup(title, group, unloadable) {
       source.append(el('span', 'dsh-mcp-source-label', T.source), document.createTextNode(group.file));
       meta.append(source);
     }
-    if (unloadable === true) meta.append(unloadButton());
+    if (unloadDescription !== undefined) meta.append(unloadButton(unloadDescription));
     head.append(meta);
   }
   section.append(head);
@@ -863,7 +909,11 @@ function render(state, variant, servers) {
   if (isEmpty) {
     root.append(el('div', 'dsh-mcp-empty', T.empty));
   } else {
-    for (const node of [renderGroup(T.workspace, w, true), renderGroup(T.manual, m, true), renderGroup(T.global, g, false)]) {
+    for (const node of [
+      renderGroup(T.workspace, w, T.unloadWorkspace),
+      renderGroup(T.manual, m, T.unloadManual),
+      renderGroup(T.global, g, undefined),
+    ]) {
       if (node !== null) root.append(node);
     }
   }

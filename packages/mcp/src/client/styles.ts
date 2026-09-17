@@ -150,28 +150,24 @@ const CSS = `
   min-width: 0;
 }
 
-/* 卸载：默认与「来源」同色的弱按钮；进入确认态才用警示色 */
+/* 卸载：红色垃圾桶图标按钮（无文字）；破坏性操作由 Modal 二次确认 */
 .dsh-mcp-unload {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font: inherit;
-  font-size: 12px;
-  line-height: 20px;
-  white-space: nowrap;
+  color: var(--dsw-alias-state-error-primary);
   cursor: pointer;
 }
 
 .dsh-mcp-unload:hover:not(:disabled) {
-  color: var(--dsw-alias-label-secondary);
-}
-
-.dsh-mcp-unload[data-confirm="true"] {
-  color: var(--dsw-alias-state-error-primary);
-  font-weight: 500;
+  background: var(--dsw-specific-tip);
 }
 
 .dsh-mcp-unload:disabled {
@@ -180,8 +176,13 @@ const CSS = `
 }
 
 .dsh-mcp-unload:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline: 2px solid var(--dsw-alias-state-error-primary);
   outline-offset: 1px;
+}
+
+.dsh-mcp-unload svg {
+  width: 15px;
+  height: 15px;
 }
 
 .dsh-mcp-group-title {

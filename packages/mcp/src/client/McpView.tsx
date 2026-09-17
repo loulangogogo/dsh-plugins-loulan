@@ -6,6 +6,7 @@ import type { ChangeEvent } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import { Button, IconTrashOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { McpMountGroup, McpTransport, UnloadableMountGroup } from '../contract.js'
 import type { McpSnapshot, MountControlResult } from './mcp-source.js'
 import { toolsText } from './mcp-source.js'
@@ -55,10 +56,14 @@ interface GroupLabels {
   expand: string
   /** 收起。 */
   collapse: string
-  /** 卸载。 */
+  /** 卸载入口的无障碍名与 tooltip。 */
   unload: string
-  /** 确认卸载。 */
+  /** 确认弹框标题。 */
+  unloadTitle: string
+  /** 确认弹框的确认按钮。 */
   unloadConfirm: string
+  /** 确认弹框的取消按钮。 */
+  unloadCancel: string
 }
 
 /** 刷新图标：线性描边，随文字颜色。 */
@@ -91,39 +96,58 @@ function PlusIcon() {
 }
 
 /**
- * 分组的卸载按钮：第一次点击进入确认态，第二次才真正卸载；失焦即取消确认。
+ * 分组的卸载入口：红色垃圾桶图标按钮，点击后由 Modal 二次确认。
+ *
+ * 确认弹框沿用 harness `RiskConfirmation` 的按钮组合（outline 取消 + primary 确认），
+ * 而不是自创新的危险色按钮，以保持与产品一致。
  *
  * @param props - 文案、禁用状态与确认后的回调
- * @returns 卸载按钮
+ * @returns 图标按钮与确认弹框
  */
-function UnloadButton({ label, confirmLabel, disabled, onConfirm }: {
+function UnloadButton({ label, title, description, confirmLabel, cancelLabel, disabled, onConfirm }: {
   label: string
+  title: string
+  description: string
   confirmLabel: string
+  cancelLabel: string
   disabled: boolean
   onConfirm: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
-  const text = confirming ? confirmLabel : label
+  const [open, setOpen] = useState(false)
   return (
-    <button
-      type="button"
-      className="dsh-mcp-unload"
-      data-confirm={confirming}
-      disabled={disabled}
-      title={text}
-      aria-label={text}
-      onBlur={() => { setConfirming(false) }}
-      onClick={() => {
-        if (!confirming) {
-          setConfirming(true)
-          return
-        }
-        setConfirming(false)
-        onConfirm()
-      }}
-    >
-      {text}
-    </button>
+    <>
+      <button
+        type="button"
+        className="dsh-mcp-unload"
+        disabled={disabled}
+        title={label}
+        aria-label={label}
+        onClick={() => { setOpen(true) }}
+      >
+        <IconTrashOutline16 size={15} />
+      </button>
+      <Modal
+        open={open}
+        onClose={() => { setOpen(false) }}
+        title={title}
+        description={description}
+        closeLabel={cancelLabel}
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => { setOpen(false) }}>{cancelLabel}</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setOpen(false)
+                onConfirm()
+              }}
+            >
+              {confirmLabel}
+            </Button>
+          </>
+        )}
+      />
+    </>
   )
 }
 
@@ -198,7 +222,7 @@ function ToolsRow({ tools, labels }: { tools: readonly string[]; labels: GroupLa
  * @param group - 分组数据
  * @param labels - 分组内文案
  * @param pending - 是否有控制动作在进行（进行中禁用卸载）
- * @param onUnload - 卸载回调；缺省表示该分组不可卸载（全局共享）
+ * @param unload - 卸载说明与回调；缺省表示该分组不可卸载（全局共享）
  * @returns 分组节点；空组返回 null
  */
 function renderGroup(
@@ -206,14 +230,14 @@ function renderGroup(
   group: McpMountGroup,
   labels: GroupLabels,
   pending: boolean,
-  onUnload?: () => void,
+  unload?: { description: string; run: () => void },
 ) {
   if (group.servers.length === 0) return null
   return (
     <section className="dsh-mcp-group">
       <div className="dsh-mcp-group-head">
         <span className="dsh-mcp-group-title">{title}</span>
-        {group.file === undefined && onUnload === undefined
+        {group.file === undefined && unload === undefined
           ? null
           : (
             <span className="dsh-mcp-group-meta">
@@ -226,14 +250,17 @@ function renderGroup(
                     {group.file}
                   </span>
                 )}
-              {onUnload === undefined
+              {unload === undefined
                 ? null
                 : (
                   <UnloadButton
                     label={labels.unload}
+                    title={labels.unloadTitle}
+                    description={unload.description}
                     confirmLabel={labels.unloadConfirm}
+                    cancelLabel={labels.unloadCancel}
                     disabled={pending}
-                    onConfirm={onUnload}
+                    onConfirm={unload.run}
                   />
                 )}
             </span>
@@ -315,7 +342,9 @@ export function McpView({ useMcp, t, refresh, addUpload, unload }: McpViewProps)
     expand: t('tools.expand'),
     collapse: t('tools.collapse'),
     unload: t('group.unload'),
-    unloadConfirm: t('group.unloadConfirm'),
+    unloadTitle: t('unload.title'),
+    unloadConfirm: t('unload.confirm'),
+    unloadCancel: t('unload.cancel'),
   }
   const unloadFailed = t('error.unloadFailed')
 
@@ -360,14 +389,14 @@ export function McpView({ useMcp, t, refresh, addUpload, unload }: McpViewProps)
               data.workspace,
               labels,
               pending,
-              () => { run(unloadFailed, () => unload('workspace')) },
+              { description: t('unload.workspace'), run: () => { run(unloadFailed, () => unload('workspace')) } },
             )}
             {renderGroup(
               t('group.manual'),
               data.manual,
               labels,
               pending,
-              () => { run(unloadFailed, () => unload('manual')) },
+              { description: t('unload.manual'), run: () => { run(unloadFailed, () => unload('manual')) } },
             )}
             {/* 全局共享刻意不给卸载入口：服务端亦拒绝 group=global。 */}
             {renderGroup(t('group.global'), data.global, labels, pending)}

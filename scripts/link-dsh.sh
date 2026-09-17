@@ -55,6 +55,7 @@ declare -a PACKAGES=(
   "dsh-client-store:packages/client/store"
   "dsh-client-locale:packages/client/locale"
   "dsh-client-ui-slots:packages/client/ui-slots"
+  "dsh-client-ui-primitives:packages/client/ui-primitives"
   "dsh-client-ui-conversation:packages/client/ui-conversation"
   "dsh-client-ui-renderer:packages/client/ui-renderer"
   "dsh-host-webserver:packages/host/webserver"
