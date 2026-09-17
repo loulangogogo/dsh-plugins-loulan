@@ -140,6 +140,13 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, runtime: Moun
 
   if (url.pathname === MOUNTS_ROUTE_PATH) {
     if (req.method !== 'GET') return sendEmpty(res, 405)
+    // 读取前先同步全局配置的磁盘现状（文件变更增量重挂、文件消失则卸载全局服务）；
+    // 内容未变时内部只比对指纹，不重挂。同步失败不影响这次读取：照旧返回内存快照。
+    try {
+      await runtime.syncGlobal()
+    } catch (error) {
+      console.error('[dsh-loulan-mcp] 同步全局 MCP 配置失败:', error)
+    }
     return sendJson(res, 200, runtime.read(sessionId))
   }
 

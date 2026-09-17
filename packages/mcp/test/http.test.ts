@@ -26,11 +26,15 @@ const globalOnly: McpMountedData = { global: globalGroup, workspace: { servers: 
  * @param options - 覆盖 refresh / addUpload / unload 的返回值
  * @returns 运行时桩与调用记录
  */
-function fakeRuntime(options: { refresh?: ActionResult; add?: ActionResult; unload?: ActionResult } = {}) {
+function fakeRuntime(
+  options: { refresh?: ActionResult; add?: ActionResult; unload?: ActionResult; syncGlobal?: () => Promise<void> } = {},
+) {
   const calls = {
     refresh: [] as Array<string | null>,
     add: [] as Array<[string | null, unknown, unknown]>,
     unload: [] as Array<[string | null, unknown]>,
+    /** 调用顺序：用于断言 GET 先同步全局再读取载荷。 */
+    order: [] as string[],
   }
   const runtime: MountsRuntime = {
     seedGlobal: () => {},
@@ -38,8 +42,15 @@ function fakeRuntime(options: { refresh?: ActionResult; add?: ActionResult; unlo
     globalServers: () => [],
     track: () => {},
     forget: () => {},
-    read: sessionId => (sessionId === 's1' ? work : globalOnly),
+    read: (sessionId) => {
+      calls.order.push('read')
+      return sessionId === 's1' ? work : globalOnly
+    },
     isBusy: () => false,
+    syncGlobal: async () => {
+      calls.order.push('syncGlobal')
+      await options.syncGlobal?.()
+    },
     refresh: async (sessionId) => {
       calls.refresh.push(sessionId)
       return options.refresh ?? { ok: true, data: work }
@@ -269,4 +280,37 @@ test('POST /unload 的 400 文案原样写回（全局共享不可卸载）', as
   await tick()
   assert.equal(res.statusCode, 400)
   assert.deepEqual(JSON.parse(res.body), { error: '全局共享服务不可卸载' })
+})
+
+test('GET /mounts 先同步全局配置再读取载荷', async () => {
+  const { runtime, calls } = fakeRuntime()
+  const res = fakeRes()
+  createMountsHandler(runtime)(
+    fakeReq({ method: 'GET', url: `${MOUNTS_ROUTE_PATH}?sessionId=s1` }) as never,
+    res as never,
+  )
+  await tick()
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(JSON.parse(res.body), work)
+  assert.deepEqual(calls.order, ['syncGlobal', 'read'])
+})
+
+test('GET /mounts 同步全局失败时仍返回内存快照', async () => {
+  const logged: string[] = []
+  const originalError = console.error
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(' ')) }
+  try {
+    const { runtime, calls } = fakeRuntime({
+      syncGlobal: () => Promise.reject(new Error('磁盘不可读')),
+    })
+    const res = fakeRes()
+    createMountsHandler(runtime)(fakeReq({ method: 'GET', url: MOUNTS_ROUTE_PATH }) as never, res as never)
+    await tick()
+    assert.equal(res.statusCode, 200)
+    assert.deepEqual(JSON.parse(res.body), globalOnly)
+    assert.deepEqual(calls.order, ['syncGlobal', 'read'])
+    assert.ok(logged.some(line => line.includes('磁盘不可读')))
+  } finally {
+    console.error = originalError
+  }
 })

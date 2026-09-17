@@ -10,7 +10,7 @@
 - **自动挂载、无需审批**：工作区命中 `.mcp.json` 即在 agent 创建时挂载，不征求用户同意；没有 `.mcp.json` 的工作区不挂载。
 - **两种传输**：stdio（本地子进程）与 streamable-http（远程服务）。
 - **多会话互不冲突**：工作区挂载时按 agent 生成唯一 `serverName`（工具形如 `mcp__<serverName>__<agentToken>__<tool>`），同一工作区并发多个会话时各自独立、互不冲突。
-- **会话内「MCP」标签页**：会话视图区（与「对话」「轨迹」同级）展示当前会话已加载的 MCP 服务，分「本工作区」「手动添加」与「全局共享」三组，含服务名、传输方式与工具名。数据由 Host 的进程内运行时经端点提供：`GET /dsh-loulan-mcp/mounts` 读取清单、`POST /dsh-loulan-mcp/refresh` 刷新重挂、`POST /dsh-loulan-mcp/add` 上传添加，客户端按会话调用；不写入会话日志、不进入模型上下文。
+- **会话内「MCP」标签页**：会话视图区（与「对话」「轨迹」同级）展示当前会话已加载的 MCP 服务，分「本工作区」「手动添加」与「全局共享」三组，含服务名、传输方式与工具名。数据由 Host 的进程内运行时经端点提供：`GET /dsh-loulan-mcp/mounts` 读取清单（读取前会同步全局 `.mcp.json` 现状）、`POST /dsh-loulan-mcp/refresh` 刷新重挂、`POST /dsh-loulan-mcp/add` 上传添加、`POST /dsh-loulan-mcp/unload` 卸载某个来源分组，客户端按会话调用；不写入会话日志、不进入模型上下文。
 
 ## 安装
 
@@ -91,7 +91,8 @@ dsh plugin --profile web add dsh-loulan-mcp
 - **超时**：单次工具调用默认 60 秒。
 - **依赖版本**：本插件依赖 `@deepseek-ai/dsh-mcp-client`，其版本须与 DSH 运行时一致，否则可能出现两份 mcp-client 导致工具注册冲突。
 - **发布前必须构建**：`lib/` 不入库，且 `dsh.client` 声明与 `lib/client.js` 必须共存；已配置 `prepack` 自动触发 `build`，若绕过脚本手工打包，须先构建，否则声明存在而产物缺失会让 Web 启动失败。
-- **端点无鉴权、仅限 localhost**：`GET /dsh-loulan-mcp/mounts` 读取清单（返回本机 `.mcp.json` 路径与工具名），`POST /dsh-loulan-mcp/refresh` 刷新重挂，`POST /dsh-loulan-mcp/add` 上传添加。三个端点均不做身份校验，只按 `sec-fetch-site` 拒绝跨站浏览器请求，因此仅适用于 localhost 绑定的部署；两个写端点与 GET 同样源校验、无鉴权，并受「有会话运行中则 409」的空闲保护。
+- **端点无鉴权、仅限 localhost**：`GET /dsh-loulan-mcp/mounts` 读取清单（返回本机 `.mcp.json` 路径与工具名），`POST /dsh-loulan-mcp/refresh` 刷新重挂，`POST /dsh-loulan-mcp/add` 上传添加，`POST /dsh-loulan-mcp/unload` 卸载某个来源分组。四个端点均不做身份校验，只按 `sec-fetch-site` 拒绝跨站浏览器请求，因此仅适用于 localhost 绑定的部署；写端点与 GET 同样源校验、无鉴权，并受「有会话运行中则 409」的空闲保护。
+- **全局配置以磁盘为准**：`GET /mounts` 与 `POST /refresh` 都会先同步全局 `.mcp.json`——内容变更做增量重挂，**文件消失则卸载全部全局服务**（重新出现时按新内容挂回），内容未变只比对指纹、不重挂；解析失败保留现有挂载并告警。有会话正在运行时，`GET` 的同步静默跳过（只返回内存快照），`POST /refresh` 返回 409。
 
 ## 开发与测试
 

@@ -234,7 +234,7 @@ test('runtime refresh 全局增量：保留未变、重挂变更、卸载删除'
   }
 })
 
-test('runtime refresh 全局文件缺失或解析失败时保留现存挂载', async () => {
+test('runtime refresh 全局文件缺失时卸载全部全局服务，重新出现时挂回', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
   try {
     const file = join(dir, '.mcp.json')
@@ -244,17 +244,135 @@ test('runtime refresh 全局文件缺失或解析失败时保留现存挂载', a
     const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => path })
     runtime.track(fakeAgent(ctx), undefined, [])
     assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(fibers.length, 1)
 
+    // 文件消失视为配置清空：释放全部全局句柄，三处视图同步清空。
     path = undefined
     assert.equal((await runtime.refresh('s1')).ok, true)
-    assert.equal(fibers.length, 1)
-    assert.equal(fibers.filter(f => !f.disposed).length, 1)
+    assert.equal(fibers[0]?.disposed, true)
+    assert.deepEqual(runtime.globalGroup().servers, [])
+    assert.deepEqual(runtime.globalServers(), [])
+    assert.deepEqual(runtime.read('s1').global.servers, [])
 
+    // 文件重新出现：按新内容挂回（含新增的 b）。
     path = file
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' }, b: { command: 'y' } } }))
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.deepEqual(
+      fibers.filter(f => !f.disposed).map(f => f.config.serverName).sort(),
+      ['a', 'b'],
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runtime refresh 全局文件解析失败时保留现存挂载', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+    runtime.track(fakeAgent(ctx), undefined, [])
+    assert.equal((await runtime.refresh('s1')).ok, true)
+
+    // 半截文件（编辑中）不得清空全局挂载。
     writeFileSync(file, '{bad json')
     assert.equal((await runtime.refresh('s1')).ok, true)
     assert.equal(fibers.length, 1)
     assert.equal(fibers.filter(f => !f.disposed).length, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('syncGlobal 不依赖会话即可挂载全局服务（GET 拉取路径）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    // 刻意不 track 任何会话：标签页拉取清单时可能尚未登记该会话。
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+
+    await runtime.syncGlobal()
+    assert.deepEqual(fibers.map(f => f.config.serverName), ['a'])
+    assert.equal(runtime.read(null).global.servers[0]?.name, 'a')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('syncGlobal 全局配置未变时不重挂', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+
+    await runtime.syncGlobal()
+    const count = fibers.length
+    await runtime.syncGlobal()
+    assert.equal(fibers.length, count)
+    assert.equal(fibers[0]?.disposed, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('syncGlobal 并发调用只挂载/释放一次', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const events: string[] = []
+    const { ctx, fibers } = fakeCtx({ events })
+    let path: string | undefined = file
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => path })
+
+    // 并发首次同步：只挂载一次。
+    await Promise.all([runtime.syncGlobal(), runtime.syncGlobal()])
+    assert.deepEqual(events, ['mount:a'])
+
+    // 文件消失后并发同步：同一批句柄只释放一次。
+    events.length = 0
+    path = undefined
+    await Promise.all([runtime.syncGlobal(), runtime.syncGlobal()])
+    assert.deepEqual(events, ['dispose:a'])
+    assert.equal(fibers.length, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('syncGlobal 忙时不动 fiber（含文件缺失时不卸载）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const agents: Array<{ status: string }> = []
+    const { ctx, fibers } = fakeCtx()
+    let disposed = false
+    let path: string | undefined = undefined
+    const runtime = createMountsRuntime({
+      ctx,
+      resolveGlobalFile: () => path,
+      listAgents: () => agents,
+    })
+    runtime.seedGlobal([handle({ serverName: 'g', rawName: 'g' }, { dispose: () => { disposed = true } })])
+
+    agents.push({ status: 'running' })
+    // 文件已出现且有新内容：忙时不得挂载。
+    path = file
+    await runtime.syncGlobal()
+    assert.equal(fibers.length, 0)
+    // 文件缺失：忙时也不得卸载既有全局挂载。
+    path = undefined
+    await runtime.syncGlobal()
+    assert.equal(disposed, false)
+    assert.equal(runtime.read(null).global.servers[0]?.name, 'g')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

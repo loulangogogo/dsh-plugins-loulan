@@ -112,6 +112,15 @@ export interface MountsRuntime {
    */
   read(sessionId: string | null): McpMountedData
   /**
+   * 同步全局 .mcp.json 的磁盘现状：内容变更增量重挂，文件消失则卸载全部全局服务。
+   *
+   * 拉取清单（GET）与刷新都会调用；有会话正在运行时**静默跳过**，避免读路径打断
+   * 运行中的会话；并发调用复用同一次同步，避免重复挂载/释放同一批 fiber。
+   *
+   * @returns 同步完成的 Promise；失败时 reject，由调用方决定是否影响本次响应
+   */
+  syncGlobal(): Promise<void>
+  /**
    * 是否有任何会话正在运行。
    *
    * @returns true 表示存在 agent.status === 'running' 的会话
@@ -194,6 +203,8 @@ export function createMountsRuntime(options: {
   const sessions = new Map<string, SessionRecord>()
   /** 当前全局挂载：服务名 → 句柄。 */
   const globalHandles = new Map<string, MountedHandle>()
+  /** 进行中的全局同步：并发调用复用同一 Promise，避免重复动同一批 fiber。 */
+  let globalSync: Promise<void> | null = null
 
   /** 取当前全局服务明细。 */
   const globalServers = (): MountedServer[] => handlesToServers([...globalHandles.values()])
@@ -241,12 +252,22 @@ export function createMountsRuntime(options: {
   /**
    * 全局增量重挂：仅对新增/变更/删除的服务动 fiber，未变的原样保留。
    *
-   * 全局文件不存在或解析失败时保守处理：不卸载任何现存全局挂载。
+   * 文件不存在视为配置清空：卸载全部现存全局挂载（文件重新出现时按新内容挂回）。
+   * 解析失败仍保守处理（保留现存挂载并告警），避免编辑中的半截文件把服务清空。
    */
   const refreshGlobal = async (): Promise<void> => {
     const file = options.resolveGlobalFile()
     if (file === undefined) {
-      console.warn('[dsh-loulan-mcp] 未发现全局 .mcp.json，保留现有全局挂载')
+      // 本来就没有全局挂载时不告警，避免每次拉取清单都刷屏。
+      if (globalHandles.size === 0) return
+      const stale = [...globalHandles.values()]
+      const failedDispose = await disposeHandles(stale)
+      warnDisposeFailures(failedDispose)
+      console.warn(`[dsh-loulan-mcp] 全局 .mcp.json 已不存在，卸载 ${stale.length} 个全局 MCP server`)
+      // 释放成功的从表中移除；释放失败的保留（旧 fiber 仍存活且句柄不能丢），供后续刷新重试。
+      for (const handle of stale) {
+        if (!failedDispose.has(handle.mounted.serverName)) globalHandles.delete(handle.mounted.serverName)
+      }
       return
     }
     let servers: Record<string, unknown>
@@ -330,6 +351,19 @@ export function createMountsRuntime(options: {
     record.uploadHandles = [...keptUploads, ...await mountUploads(record, failedDispose)]
   }
 
+  /**
+   * 同步全局配置：忙时静默跳过，并发调用复用同一次同步。
+   *
+   * @returns 同步完成的 Promise；失败时 reject，由调用方决定是否影响本次响应
+   */
+  const syncGlobal = (): Promise<void> => {
+    // 忙时静默跳过：拉取清单是读路径，不得打断运行中的会话。
+    if (isBusy()) return Promise.resolve()
+    // 并发（页面重载、多标签页、React 双订阅）复用同一次同步；结束后归零以便下次重新判断。
+    globalSync ??= refreshGlobal().finally(() => { globalSync = null })
+    return globalSync
+  }
+
   return {
     seedGlobal: (handles) => {
       for (const handle of handles) globalHandles.set(handle.mounted.serverName, handle)
@@ -347,11 +381,13 @@ export function createMountsRuntime(options: {
       return record === undefined ? buildMountPayload(globalServers(), [], []) : payloadOf(record)
     },
     isBusy,
+    syncGlobal,
     refresh: async (sessionId) => {
       const record = sessionId === null || sessionId.length === 0 ? undefined : sessions.get(sessionId)
       if (record === undefined) return { ok: false, code: 400, message: '会话未加载 MCP 服务，无法刷新' }
       if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再刷新' }
-      await refreshGlobal()
+      // 走到这里必然不忙，故 syncGlobal 必定真正执行（同时复用其并发去重）。
+      await syncGlobal()
       await refreshSession(record)
       return { ok: true, data: payloadOf(record) }
     },
