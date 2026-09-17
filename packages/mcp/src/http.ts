@@ -107,6 +107,26 @@ function readBody(req: IncomingMessage, limit: number): Promise<BodyResult> {
 }
 
 /**
+ * 读取并解析**可选**的 JSON 请求体。
+ *
+ * 请求体缺失、超限或不是合法 JSON 时返回空对象，由调用方按缺省字段处理
+ * （用于 /refresh 这类以 body 传参、但允许省略的端点）。
+ *
+ * @param req - Node 请求
+ * @returns 解析出的普通对象；不可用时为空对象
+ */
+async function readOptionalJsonRecord(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const read = await readBody(req, MAX_UPLOAD_BYTES + BODY_OVERHEAD_BYTES)
+  if (!read.ok) return {}
+  try {
+    const parsed: unknown = JSON.parse(read.body)
+    return isRecord(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
  * 按路径与方法分派请求。
  *
  * @param req - Node 请求
@@ -124,7 +144,10 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, runtime: Moun
 
   if (url.pathname === REFRESH_ROUTE_PATH) {
     if (req.method !== 'POST') return sendEmpty(res, 405)
-    return sendResult(res, await runtime.refresh(sessionId))
+    // 客户端把 sessionId 放在 POST body；查询串写法仍兼容。
+    const body = await readOptionalJsonRecord(req)
+    const id = typeof body.sessionId === 'string' ? body.sessionId : sessionId
+    return sendResult(res, await runtime.refresh(id))
   }
 
   if (url.pathname === ADD_ROUTE_PATH) {
@@ -139,7 +162,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, runtime: Moun
       return sendJson(res, 400, { error: '请求体不是合法 JSON' })
     }
     const payload = isRecord(parsed) ? parsed : {}
-    const bodySessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null
+    const bodySessionId = typeof payload.sessionId === 'string' ? payload.sessionId : sessionId
     return sendResult(res, await runtime.addUpload(bodySessionId, payload.name, payload.content))
   }
 

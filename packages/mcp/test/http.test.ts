@@ -118,6 +118,16 @@ test('POST /refresh 成功返回新载荷并带上 sessionId', async () => {
   assert.deepEqual(calls.refresh, ['s1'])
 })
 
+test('POST /refresh 从请求体取 sessionId（真实客户端以 body 传参）', async () => {
+  const { runtime, calls } = fakeRuntime()
+  const res = fakeRes()
+  const body = JSON.stringify({ sessionId: 's1' })
+  createMountsHandler(runtime)(fakeReq({ method: 'POST', url: REFRESH_ROUTE_PATH, body }) as never, res as never)
+  await tick()
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(calls.refresh, ['s1'])
+})
+
 test('POST /refresh 遇空闲保护把 409 与 error 文案写回', async () => {
   const { runtime } = fakeRuntime({ refresh: { ok: false, code: 409, message: '有会话正在运行，请稍后再刷新' } })
   const res = fakeRes()
