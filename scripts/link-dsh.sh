@@ -52,6 +52,11 @@ declare -a PACKAGES=(
   "dsh-code-runtime:packages/code-runtime/code-runtime"
   "dsh-mcp-client:packages/mcp/mcp-client"
   "dsh-commands:packages/interaction/commands"
+  "dsh-client-store:packages/client/store"
+  "dsh-client-locale:packages/client/locale"
+  "dsh-client-ui-slots:packages/client/ui-slots"
+  "dsh-client-ui-conversation:packages/client/ui-conversation"
+  "dsh-client-ui-renderer:packages/client/ui-renderer"
 )
 
 # 逐包建立软链；缺失的包告警跳过，不中断整体流程。
