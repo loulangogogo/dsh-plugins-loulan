@@ -7,6 +7,7 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 // 副作用类型导入:把 ctx.tools 声明合并到 Context 上(工具注册表类型)。
 import type {} from '@deepseek-ai/dsh-tools'
 import { dirname } from 'node:path'
+import type { McpMountGroup, McpMountedData, McpServerEntry } from './contract.js'
 import { readMcpServers } from './parse.js'
 import { mapServer } from './server-name.js'
 
@@ -22,6 +23,38 @@ export interface MountedServer {
   file: string
   /** 该 server 暴露给模型的工具名(去掉了 mcp__<serverName>__ 前缀)。 */
   tools: string[]
+}
+
+/**
+ * 把一组已挂载服务映射为展示分组。
+ *
+ * 来源文件取组内首个条目的 file：同组条目必然来自同一个 .mcp.json。
+ *
+ * @param mounts - 同一来源下成功挂载的服务明细
+ * @returns 分组（空数组时不含 file）
+ */
+export function toMountGroup(mounts: readonly MountedServer[]): McpMountGroup {
+  const file = mounts[0]?.file
+  const servers: McpServerEntry[] = mounts.map(mount => ({
+    name: mount.rawName,
+    transport: mount.transport,
+    tools: mount.tools,
+  }))
+  return { ...(file === undefined ? {} : { file }), servers }
+}
+
+/**
+ * 组装 mcp/mounted 事件载荷。
+ *
+ * @param globalMounts - 全局 .dsh 根已挂载的服务明细
+ * @param workMounts - 工作区已挂载的服务明细
+ * @returns 分全局与工作区两组的载荷
+ */
+export function buildMountPayload(
+  globalMounts: readonly MountedServer[],
+  workMounts: readonly MountedServer[],
+): McpMountedData {
+  return { global: toMountGroup(globalMounts), workspace: toMountGroup(workMounts) }
 }
 
 /**
