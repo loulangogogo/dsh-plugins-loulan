@@ -21,8 +21,9 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.build.json && npm run typecheck:client && node scripts/build-client.mjs",
     "build:client": "node scripts/build-client.mjs",
+    "typecheck:client": "tsc -p tsconfig.client.json",
     "test": "bash scripts/test-unit.sh",
     "mcp-pack": "pnpm pack",
     "release": "pnpm login && pnpm build && pnpm publish --no-git-checks"

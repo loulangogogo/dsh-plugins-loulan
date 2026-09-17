@@ -44,7 +44,7 @@ export function toMountGroup(mounts: readonly MountedServer[]): McpMountGroup {
 }
 
 /**
- * 组装 mcp/mounted 事件载荷。
+ * 组装挂载清单载荷（供 /dsh-loulan-mcp/mounts 端点返回）。
  *
  * @param globalMounts - 全局 .dsh 根已挂载的服务明细
  * @param workMounts - 工作区已挂载的服务明细

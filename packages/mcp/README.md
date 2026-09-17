@@ -10,6 +10,7 @@
 - **自动挂载、无需审批**：工作区命中 `.mcp.json` 即在 agent 创建时挂载，不征求用户同意；没有 `.mcp.json` 的工作区不挂载。
 - **两种传输**：stdio（本地子进程）与 streamable-http（远程服务）。
 - **多会话互不冲突**：工作区挂载时按 agent 生成唯一 `serverName`（工具形如 `mcp__<serverName>__<agentToken>__<tool>`），同一工作区并发多个会话时各自独立、互不冲突。
+- **会话内「MCP」标签页**：会话视图区（与「对话」「轨迹」同级）展示当前会话已加载的 MCP 服务，分「本工作区」与「全局共享」两组，含服务名、传输方式与工具名。数据由 Host 的进程内注册表经只读端点 `/dsh-loulan-mcp/mounts` 提供，客户端按会话拉取；不写入会话日志、不进入模型上下文。
 
 ## 安装
 
@@ -99,6 +100,10 @@ dsh plugin --profile web add dsh-loulan-mcp
   ```
   （`tsx` 复用 harness 自带的运行器，见 `packages/mcp/scripts/test-unit.sh`。）
 - 构建：`pnpm --filter dsh-loulan-mcp build`，产物输出到 `lib/`。
+- 浏览器半侧位于 `packages/mcp/src/client/`，用 `node scripts/build-client.mjs`（esbuild）打包为 `lib/client.js`（harness 客户端模块系统约定的 closure-factory CJS）。
+- `package.json` 的 `dsh.client` 声明与 `lib/client.js` 必须同时存在：只声明不构建会让 Web 启动时报错。
+- 客户端代码改动后需重新构建并刷新页面；软链被 `pnpm install` 清掉后需重跑 `bash scripts/link-dsh.sh`。
+- Host 侧通过 `ctx.webServer` 注册只读端点（`inject: ['tools', 'webServer']`）；数据仅在当前进程运行期内有效。
 - 发布：`package.json` 的 `files` 包含整个 `lib/` 目录与 `cordis.patch.yml`，确保拆分的全部模块随包发布。
 
 ## 常见问题
