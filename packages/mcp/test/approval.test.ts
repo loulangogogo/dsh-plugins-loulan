@@ -31,6 +31,7 @@ const handle = (over: Partial<MountedServer> = {}): MountedHandle => ({
   mounted: srv(over),
   fiber: { dispose: () => {} },
   configKey: 'key',
+  failed: false,
 })
 
 /**

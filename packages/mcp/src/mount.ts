@@ -48,6 +48,13 @@ export interface MountedHandle {
   fiber: Disposable
   /** 映射后配置的 JSON 指纹（仅内存比较用）。 */
   configKey: string
+  /**
+   * fiber 启动是否失败。
+   *
+   * 启动失败的句柄不会被丢弃：仍登记在运行时的挂载表中，以便「配置未变时不重复
+   * 挂载」以及后续 dispose；只是不出现在展示分组里。
+   */
+  failed: boolean
 }
 
 /**
@@ -69,13 +76,13 @@ export function toMountGroup(mounts: readonly MountedServer[]): McpMountGroup {
 }
 
 /**
- * 取出一组挂载句柄的展示明细。
+ * 取出一组挂载句柄的展示明细（过滤掉启动失败的句柄）。
  *
  * @param handles - 挂载句柄数组
  * @returns 展示明细数组（顺序与入参一致）
  */
 export function handlesToServers(handles: readonly MountedHandle[]): MountedServer[] {
-  return handles.map(handle => handle.mounted)
+  return handles.filter(handle => !handle.failed).map(handle => handle.mounted)
 }
 
 /**
@@ -133,6 +140,7 @@ function toolNamesForServer(ctx: Context, serverName: string): string[] {
  * @param source - 来源标识（.mcp.json 路径或上传文件名），写入明细的 file 字段
  * @param projectDir - stdio 子进程默认 cwd（.mcp.json 所在目录或会话工作区目录）
  * @param uniqueSuffix - 按 agent 派生唯一后缀,透传给 mapServer
+ * @param exclude - 需跳过的挂载名集合（上一次 dispose 失败的 serverName，跳过以避免同名冲突）
  * @returns 成功挂载的句柄数组（tools 暂为空）
  */
 export function mountServers(
@@ -141,6 +149,7 @@ export function mountServers(
   source: string,
   projectDir: string,
   uniqueSuffix?: string,
+  exclude?: ReadonlySet<string>,
 ): MountedHandle[] {
   console.log(`[dsh-loulan-mcp] 应用 ${source}`)
   const handles: MountedHandle[] = []
@@ -148,6 +157,10 @@ export function mountServers(
     const mapped = mapServer(serverName, raw, projectDir, uniqueSuffix)
     if (!mapped.ok) {
       console.warn(`[dsh-loulan-mcp] ${mapped.reason}`)
+      continue
+    }
+    if (exclude?.has(mapped.config.serverName)) {
+      console.warn(`[dsh-loulan-mcp] "${mapped.config.serverName}" 上一次释放失败，本轮跳过挂载`)
       continue
     }
     try {
@@ -162,6 +175,7 @@ export function mountServers(
         },
         fiber,
         configKey: JSON.stringify(mapped.config),
+        failed: false,
       })
       console.log(`[dsh-loulan-mcp] 已挂载 MCP server "${mapped.config.serverName}"`)
     } catch (error) {
@@ -174,41 +188,47 @@ export function mountServers(
 /**
  * 等待一组挂载句柄的 fiber 启动完成，并为成功者枚举工具名。
  *
- * 启动失败的句柄被丢弃（不进入返回值），与「单个失败不阻断其它」的既有语义一致。
+ * 启动失败的句柄**不丢弃**：标记 `failed = true` 后一并返回（原有日志不变），
+ * 由调用方登记进挂载表，使配置未变时不会每次刷新重复挂载，且句柄仍可被 dispose。
+ * 展示侧由 handlesToServers 过滤掉这些句柄。
  *
  * @param ctx - 挂载目标（用于枚举 ctx.tools 中的工具名）
  * @param handles - mountServers 返回的句柄数组
- * @returns 启动成功的句柄数组（mounted.tools 已填充）
+ * @returns 全部句柄数组（成功者 mounted.tools 已填充；失败者 failed 为 true）
  */
 export async function settleMounts(ctx: Context, handles: MountedHandle[]): Promise<MountedHandle[]> {
   const settled = await Promise.allSettled(handles.map(handle => handle.fiber))
-  const result: MountedHandle[] = []
-  settled.forEach((item, index) => {
+  return settled.map((item, index) => {
+    const handle = handles[index]
     if (item.status === 'rejected') {
       console.error('[dsh-loulan-mcp] MCP server 启动失败:', item.reason)
-      return
+      return { ...handle, failed: true }
     }
-    const handle = handles[index]
-    result.push({
+    return {
       ...handle,
       mounted: { ...handle.mounted, tools: toolNamesForServer(ctx, handle.mounted.serverName) },
-    })
+    }
   })
-  return result
 }
 
 /**
- * 把某个 .mcp.json 文件的 mcpServers 挂载到指定 ctx,返回启动成功的挂载句柄。
+ * 把某个 .mcp.json 文件的 mcpServers 挂载到指定 ctx,返回全部挂载句柄。
  *
  * 解析文件、逐条映射并挂载 mcp-client 实例,统一等待所有实例启动后枚举各 server 工具名。
- * 单个 server 挂载失败不阻断其它 server,也不进入返回结果。
+ * 单个 server 映射或挂载失败不阻断其它 server；启动失败的句柄一并返回并标记 failed。
  *
  * @param ctx - 挂载目标:全局 ctx(启动时)或 agent.ctx(工作区,agent 局部)
  * @param file - .mcp.json 文件路径
  * @param uniqueSuffix - 按 agent 派生唯一后缀,透传给 mapServer
- * @returns 成功挂载的句柄数组(含工具名);读文件失败返回空数组
+ * @param exclude - 需跳过的挂载名集合（上一次 dispose 失败的名字）
+ * @returns 挂载句柄数组(含工具名与 failed 标记);读文件失败返回空数组
  */
-export async function mountFile(ctx: Context, file: string, uniqueSuffix?: string): Promise<MountedHandle[]> {
+export async function mountFile(
+  ctx: Context,
+  file: string,
+  uniqueSuffix?: string,
+  exclude?: ReadonlySet<string>,
+): Promise<MountedHandle[]> {
   let servers: Record<string, unknown>
   try {
     servers = await readMcpServers(file)
@@ -216,5 +236,5 @@ export async function mountFile(ctx: Context, file: string, uniqueSuffix?: strin
     console.error(`[dsh-loulan-mcp] 解析 ${file} 失败:`, error)
     return []
   }
-  return settleMounts(ctx, mountServers(ctx, servers, file, dirname(file), uniqueSuffix))
+  return settleMounts(ctx, mountServers(ctx, servers, file, dirname(file), uniqueSuffix, exclude))
 }

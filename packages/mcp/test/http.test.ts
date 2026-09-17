@@ -60,17 +60,24 @@ function fakeRes() {
 /**
  * 构造 IncomingMessage 桩：登记监听器时同步喂入请求体。
  *
- * @param options - 方法、URL、请求头与请求体
+ * @param options - 方法、URL、请求头、请求体与是否模拟流读取错误
  * @returns 请求桩
  */
-function fakeReq(options: { method: string; url: string; headers?: Record<string, string>; body?: string }) {
+function fakeReq(options: {
+  method: string
+  url: string
+  headers?: Record<string, string>
+  body?: string
+  error?: boolean
+}) {
   return {
     method: options.method,
     url: options.url,
     headers: options.headers ?? {},
     on(event: string, listener: (chunk?: Buffer) => void) {
       if (event === 'data' && options.body !== undefined) listener(Buffer.from(options.body, 'utf8'))
-      if (event === 'end') listener()
+      if (event === 'end' && options.error !== true) listener()
+      if (event === 'error' && options.error === true) listener()
       return this
     },
   }
@@ -153,10 +160,31 @@ test('POST /add 请求体不是合法 JSON 时 400', async () => {
 test('POST /add 请求体超上限时 413 且不调用运行时', async () => {
   const { runtime, calls } = fakeRuntime()
   const res = fakeRes()
-  const body = JSON.stringify({ sessionId: 's1', name: 'x.json', content: 'x'.repeat(MAX_UPLOAD_BYTES + 1) })
+  // 读取上限 = 内容上限 + 65536 余量，故需构造超过该上限的请求体。
+  const body = JSON.stringify({ sessionId: 's1', name: 'x.json', content: 'x'.repeat(MAX_UPLOAD_BYTES + 65536 + 1) })
   createMountsHandler(runtime)(fakeReq({ method: 'POST', url: ADD_ROUTE_PATH, body }) as never, res as never)
   await tick()
   assert.equal(res.statusCode, 413)
+  assert.equal(calls.add.length, 0)
+})
+
+test('POST /add 内容恰好达上限时不再误判 413', async () => {
+  const { runtime, calls } = fakeRuntime()
+  const res = fakeRes()
+  const content = 'x'.repeat(MAX_UPLOAD_BYTES)
+  const body = JSON.stringify({ sessionId: 's1', name: 'x.json', content })
+  createMountsHandler(runtime)(fakeReq({ method: 'POST', url: ADD_ROUTE_PATH, body }) as never, res as never)
+  await tick()
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(calls.add, [['s1', 'x.json', content]])
+})
+
+test('POST /add 请求体读取出错时 400 而非 413', async () => {
+  const { runtime, calls } = fakeRuntime()
+  const res = fakeRes()
+  createMountsHandler(runtime)(fakeReq({ method: 'POST', url: ADD_ROUTE_PATH, error: true }) as never, res as never)
+  await tick()
+  assert.equal(res.statusCode, 400)
   assert.equal(calls.add.length, 0)
 })
 

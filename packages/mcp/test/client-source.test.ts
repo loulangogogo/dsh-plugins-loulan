@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createMountControl, createMountSource, normalizeMounts, toolsText } from '../src/client/mcp-source.js'
+import { createMountControl, normalizeMounts, toolsText } from '../src/client/mcp-source.js'
 
 /** 合法载荷桩（三组）。 */
 const raw = {
@@ -18,10 +18,11 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 /**
  * 构造控制面依赖桩。
  *
- * @param over - 覆盖刷新/添加的实现
+ * @param over - 覆盖拉取/刷新/添加的实现
  * @returns io 桩与调用记录
  */
 function fakeIo(over: {
+  fetchMounts?: () => Promise<unknown>
   refresh?: () => Promise<unknown>
   add?: (sessionId: string, name: string, content: string) => Promise<unknown>
 } = {}) {
@@ -29,7 +30,7 @@ function fakeIo(over: {
   return {
     calls,
     io: {
-      fetchMounts: async () => raw,
+      fetchMounts: over.fetchMounts ?? (async () => raw),
       refresh: over.refresh ?? (async () => raw),
       add: async (sessionId: string, name: string, content: string) => {
         calls.add.push([sessionId, name, content])
@@ -62,52 +63,56 @@ test('normalizeMounts 拒绝畸形载荷', () => {
 })
 
 test('数据源初次订阅拉取并发布', async () => {
-  const source = createMountSource('s1', async () => raw)
-  assert.equal(source.getSnapshot(), null)
+  const control = createMountControl('s1', fakeIo().io)
+  assert.equal(control.source.getSnapshot(), null)
   const seen: unknown[] = []
-  const unsubscribe = source.subscribe(() => { seen.push(source.getSnapshot()) })
+  const unsubscribe = control.source.subscribe(() => { seen.push(control.source.getSnapshot()) })
   await tick()
-  assert.deepEqual(source.getSnapshot(), raw)
+  assert.deepEqual(control.source.getSnapshot(), raw)
   assert.equal(seen.length, 1)
   unsubscribe()
 })
 
 test('数据源拉取失败保持空态且不抛', async () => {
-  const source = createMountSource('s1', async () => { throw new Error('boom') })
-  source.subscribe(() => {})
+  const control = createMountControl('s1', fakeIo({ fetchMounts: async () => { throw new Error('boom') } }).io)
+  control.source.subscribe(() => {})
   await tick()
-  assert.equal(source.getSnapshot(), null)
+  assert.equal(control.source.getSnapshot(), null)
 })
 
 test('数据源拉取失败后可重试', async () => {
   let calls = 0
-  const source = createMountSource('s1', async () => {
-    calls += 1
-    if (calls === 1) throw new Error('boom')
-    return raw
-  })
-  source.subscribe(() => {})
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      if (calls === 1) throw new Error('boom')
+      return raw
+    },
+  }).io)
+  control.source.subscribe(() => {})
   await tick()
-  assert.equal(source.getSnapshot(), null)
-  source.subscribe(() => {})
+  assert.equal(control.source.getSnapshot(), null)
+  control.source.subscribe(() => {})
   await tick()
   assert.equal(calls, 2)
-  assert.deepEqual(source.getSnapshot(), raw)
+  assert.deepEqual(control.source.getSnapshot(), raw)
 })
 
 test('数据源工作区与手动皆空但全局非空时可重拉', async () => {
   let calls = 0
-  const source = createMountSource('s1', async () => {
-    calls += 1
-    return calls === 1 ? globalOnly : raw
-  })
-  source.subscribe(() => {})
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      return calls === 1 ? globalOnly : raw
+    },
+  }).io)
+  control.source.subscribe(() => {})
   await tick()
-  assert.deepEqual(source.getSnapshot(), globalOnly)
-  source.subscribe(() => {})
+  assert.deepEqual(control.source.getSnapshot(), globalOnly)
+  control.source.subscribe(() => {})
   await tick()
   assert.equal(calls, 2)
-  assert.deepEqual(source.getSnapshot(), raw)
+  assert.deepEqual(control.source.getSnapshot(), raw)
 })
 
 test('refresh 成功用响应更新快照并通知订阅者', async () => {

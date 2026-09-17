@@ -188,20 +188,6 @@ function createLazySource(
 }
 
 /**
- * 创建某会话的挂载快照源：初次订阅时拉取一次并发布，失败保持空态且可重试。
- *
- * @param sessionId - 会话 id
- * @param fetchMounts - 拉取函数（由 apply 注入的真实 fetch）
- * @returns 可订阅的快照源
- */
-export function createMountSource(
-  sessionId: string,
-  fetchMounts: (sessionId: string) => Promise<unknown>,
-): ObservableSnapshot<McpSnapshot> {
-  return createLazySource(sessionId, fetchMounts, createSnapshotStore())
-}
-
-/**
  * 创建某会话的数据源与控制面。
  *
  * 数据源与控制动作共用同一份快照：动作成功后立即用响应更新快照并通知订阅者，

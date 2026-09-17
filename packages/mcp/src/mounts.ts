@@ -161,7 +161,12 @@ export function createMountsRuntime(options: {
   /** 解析当前全局 .mcp.json 路径；不存在返回 undefined。 */
   resolveGlobalFile: () => string | undefined
   /** 挂载实现（默认 mountFile），测试可注入桩。 */
-  mount?: (ctx: Context, file: string, suffix?: string) => Promise<MountedHandle[]>
+  mount?: (
+    ctx: Context,
+    file: string,
+    suffix?: string,
+    exclude?: ReadonlySet<string>,
+  ) => Promise<MountedHandle[]>
 }): MountsRuntime {
   const mount = options.mount ?? mountFile
   const sessions = new Map<string, SessionRecord>()
@@ -184,9 +189,31 @@ export function createMountsRuntime(options: {
   /** 手动挂载的 serverName 后缀：工作区后缀再加 "u"，避免与工作区同名服务冲突。 */
   const manualSuffix = (sessionId: string): string => `${agentToken(sessionId)}u`
 
-  /** 并发释放一组句柄，失败仅记录不抛出。 */
-  const disposeHandles = async (handles: readonly MountedHandle[]): Promise<void> => {
-    await Promise.allSettled(handles.map(handle => handle.fiber.dispose()))
+  /**
+   * 逐个释放一组句柄：记录每个失败项并返回释放失败的 serverName 集合。
+   *
+   * 释放失败意味着旧 fiber 仍存活且同名服务无法安全重挂，故失败者本轮不再挂载。
+   *
+   * @param handles - 待释放的挂载句柄
+   * @returns 释放失败的 serverName 集合
+   */
+  const disposeHandles = async (handles: readonly MountedHandle[]): Promise<Set<string>> => {
+    const failed = new Set<string>()
+    for (const handle of handles) {
+      try {
+        await handle.fiber.dispose()
+      } catch (error) {
+        console.error(`[dsh-loulan-mcp] 释放 MCP server "${handle.mounted.serverName}" 失败:`, error)
+        failed.add(handle.mounted.serverName)
+      }
+    }
+    return failed
+  }
+
+  /** 释放失败时记录一条告警（这些名字本轮不再重挂）。 */
+  const warnDisposeFailures = (failed: ReadonlySet<string>): void => {
+    if (failed.size === 0) return
+    console.warn(`[dsh-loulan-mcp] 以下 MCP server 释放失败，本轮跳过重挂: ${[...failed].join(', ')}`)
   }
 
   /**
@@ -228,10 +255,15 @@ export function createMountsRuntime(options: {
     const stale = staleNames
       .map(name => globalHandles.get(name))
       .filter((handle): handle is MountedHandle => handle !== undefined)
-    for (const name of staleNames) globalHandles.delete(name)
-    await disposeHandles(stale)
+    const failedDispose = await disposeHandles(stale)
+    warnDisposeFailures(failedDispose)
+    // 释放成功的名字从表中移除；释放失败的保留（旧 fiber 仍存活且句柄不能丢），
+    // 以便后续刷新再次尝试释放，同时本轮不重挂同名服务。
+    for (const name of staleNames) {
+      if (!failedDispose.has(name)) globalHandles.delete(name)
+    }
 
-    const freshNames = [...plan.mount, ...plan.remount]
+    const freshNames = [...plan.mount, ...plan.remount].filter(name => !failedDispose.has(name))
     if (freshNames.length === 0) return
     const subset: Record<string, unknown> = {}
     for (const name of freshNames) subset[name] = servers[name]
@@ -239,8 +271,14 @@ export function createMountsRuntime(options: {
     for (const handle of fresh) globalHandles.set(handle.mounted.serverName, handle)
   }
 
-  /** 挂载该会话的全部已上传文件，返回新句柄。 */
-  const mountUploads = async (record: SessionRecord): Promise<MountedHandle[]> => {
+  /**
+   * 挂载该会话的全部已上传文件，返回新句柄。
+   *
+   * @param record - 会话记录
+   * @param exclude - 需跳过的挂载名集合（上一次 dispose 失败的名字）
+   * @returns 新挂载的句柄
+   */
+  const mountUploads = async (record: SessionRecord, exclude?: ReadonlySet<string>): Promise<MountedHandle[]> => {
     const projectDir = projectDirOf(record)
     const suffix = manualSuffix(record.agent.id)
     const handles: MountedHandle[] = []
@@ -248,7 +286,7 @@ export function createMountsRuntime(options: {
       const servers = parseMcpServersText(upload.content)
       handles.push(...await settleMounts(
         record.agent.ctx,
-        mountServers(record.agent.ctx, servers, upload.name, projectDir, suffix),
+        mountServers(record.agent.ctx, servers, upload.name, projectDir, suffix, exclude),
       ))
     }
     return handles
@@ -256,14 +294,18 @@ export function createMountsRuntime(options: {
 
   /** 本会话重挂：卸载并重挂工作区与手动添加的句柄，只影响本会话。 */
   const refreshSession = async (record: SessionRecord): Promise<void> => {
-    const stale = [...record.workspaceHandles, ...record.uploadHandles]
-    record.workspaceHandles = []
-    record.uploadHandles = []
-    await disposeHandles(stale)
+    const failedDispose = await disposeHandles([...record.workspaceHandles, ...record.uploadHandles])
+    warnDisposeFailures(failedDispose)
+    // 释放失败的句柄保留在记录中（旧 fiber 仍存活），供后续刷新重试释放。
+    const keptWork = record.workspaceHandles.filter(handle => failedDispose.has(handle.mounted.serverName))
+    const keptUploads = record.uploadHandles.filter(handle => failedDispose.has(handle.mounted.serverName))
+    record.workspaceHandles = keptWork
+    record.uploadHandles = keptUploads
     if (record.workspaceFile !== undefined) {
-      record.workspaceHandles = await mount(record.agent.ctx, record.workspaceFile, agentToken(record.agent.id))
+      const fresh = await mount(record.agent.ctx, record.workspaceFile, agentToken(record.agent.id), failedDispose)
+      record.workspaceHandles = [...keptWork, ...fresh]
     }
-    record.uploadHandles = await mountUploads(record)
+    record.uploadHandles = [...keptUploads, ...await mountUploads(record, failedDispose)]
   }
 
   return {
@@ -294,6 +336,8 @@ export function createMountsRuntime(options: {
     addUpload: async (sessionId, name, content) => {
       const record = sessionId === null || sessionId.length === 0 ? undefined : sessions.get(sessionId)
       if (record === undefined) return { ok: false, code: 400, message: '会话未加载 MCP 服务，无法添加' }
+      // 空闲保护优先于内容校验：忙时一律 409，不因文件非法改判 400。
+      if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再添加' }
       if (typeof name !== 'string' || name.length === 0) {
         return { ok: false, code: 400, message: '文件名不能为空' }
       }
@@ -310,7 +354,6 @@ export function createMountsRuntime(options: {
       if (Object.keys(servers).length === 0) {
         return { ok: false, code: 400, message: '文件中没有 mcpServers' }
       }
-      if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再添加' }
       const handles = await settleMounts(
         record.agent.ctx,
         mountServers(record.agent.ctx, servers, name, projectDirOf(record), manualSuffix(record.agent.id)),

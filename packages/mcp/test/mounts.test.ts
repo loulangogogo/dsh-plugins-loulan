@@ -19,21 +19,41 @@ interface FakeFiber {
 /**
  * 构造 ctx 桩。
  *
- * ctx.plugin 返回非 thenable 的假 fiber（allSettled 视作已启动），
- * ctx.tools.schemas 返回空工具表，ctx.agents.list 由用例控制。
+ * ctx.plugin 返回假 fiber（非 thenable 时 allSettled 视作已启动；fail 集合内的名字返回
+ * rejected thenable 以模拟启动失败），ctx.tools.schemas 返回空工具表，ctx.agents.list 由用例控制。
  *
  * @param agents - ctx.agents.list() 返回的 agent 列表
+ * @param options - events 记录挂载/释放顺序；fail 模拟启动失败；failDispose 模拟释放抛错
  * @returns ctx 桩与假 fiber 记录
  */
-function fakeCtx(agents: Array<{ status: string }> = []) {
+function fakeCtx(
+  agents: Array<{ status: string }> = [],
+  options: { events?: string[]; fail?: ReadonlySet<string>; failDispose?: ReadonlySet<string> } = {},
+) {
   const fibers: FakeFiber[] = []
   const ctx = {
     agents: { list: () => agents },
     tools: { schemas: () => [] },
     plugin: (_plugin: unknown, config: FakeFiber['config']) => {
+      const name = String(config.serverName)
       const fiber: FakeFiber = { config, disposed: false }
       fibers.push(fiber)
-      return { dispose: () => { fiber.disposed = true; return Promise.resolve() } }
+      options.events?.push(`mount:${name}`)
+      const handle = {
+        dispose: () => {
+          options.events?.push(`dispose:${name}`)
+          if (options.failDispose?.has(name)) throw new Error('释放失败')
+          fiber.disposed = true
+          return Promise.resolve()
+        },
+      }
+      if (options.fail?.has(name)) {
+        return {
+          ...handle,
+          then: (_resolve: unknown, reject: (reason: unknown) => void) => reject(new Error('启动失败')),
+        }
+      }
+      return handle
     },
   }
   return { ctx: ctx as unknown as Context, fibers }
@@ -61,9 +81,10 @@ function fakeAgent(ctx: Context, id = 's1', cwd: string | undefined = '/proj'): 
  *
  * @param over - 覆盖的明细字段
  * @param fiber - 自定义句柄（用于观察 dispose）
+ * @param failed - 是否标记为启动失败
  * @returns 挂载句柄桩
  */
-function handle(over: Partial<MountedServer> = {}, fiber?: Disposable): MountedHandle {
+function handle(over: Partial<MountedServer> = {}, fiber?: Disposable, failed = false): MountedHandle {
   const mounted: MountedServer = {
     serverName: 'memory',
     rawName: 'memory',
@@ -72,7 +93,7 @@ function handle(over: Partial<MountedServer> = {}, fiber?: Disposable): MountedH
     tools: [],
     ...over,
   }
-  return { mounted, fiber: fiber ?? { dispose: () => {} }, configKey: `key:${mounted.serverName}` }
+  return { mounted, fiber: fiber ?? { dispose: () => {} }, configKey: `key:${mounted.serverName}`, failed }
 }
 
 test('planGlobalRefresh 分出保留/新增/变更/删除四类', () => {
@@ -129,6 +150,12 @@ test('runtime 存在运行中会话时 409 且不动 fiber', async () => {
   assert.deepEqual(await runtime.refresh('s1'), { ok: false, code: 409, message: '有会话正在运行，请稍后再刷新' })
   const added = await runtime.addUpload('s1', 'extra.json', '{"mcpServers":{"extra":{"command":"uvx"}}}')
   assert.deepEqual(added, { ok: false, code: 409, message: '有会话正在运行，请稍后再添加' })
+  // 忙 + 非法内容：仍判 409，不退化为 400。
+  assert.deepEqual(await runtime.addUpload('s1', '', '{bad'), {
+    ok: false,
+    code: 409,
+    message: '有会话正在运行，请稍后再添加',
+  })
   assert.equal(fibers.length, 0)
 })
 
@@ -262,4 +289,75 @@ test('runtime refresh 只重挂本会话的工作区与手动句柄', async () =
   assert.deepEqual(disposed, ['workspace:old'])
   assert.equal(manual?.disposed, true)
   assert.equal(fibers.filter(f => f.config.serverName === manual?.config.serverName).length, 2)
+})
+
+test('启动失败的全局服务仍登记句柄：配置未变时不重复挂载且不出现在分组里', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { bad: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx([], { fail: new Set(['bad']) })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+    runtime.track(fakeAgent(ctx), undefined, [])
+
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(fibers.length, 1)
+    assert.deepEqual(runtime.globalGroup().servers, [])
+
+    // 配置未变：失败句柄仍在挂载表中，不得重复挂载同名 fiber。
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(fibers.length, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('释放失败的全局服务本轮不再重挂并记录日志', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  const logged: string[] = []
+  const originalError = console.error
+  const originalWarn = console.warn
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(' ')) }
+  console.warn = (...args: unknown[]) => { logged.push(args.map(String).join(' ')) }
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx([], { failDispose: new Set(['a']) })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+    runtime.track(fakeAgent(ctx), undefined, [])
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(fibers.length, 1)
+
+    // 配置变更触发 remount：旧 fiber 释放失败，本轮不得以同名重新挂载。
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'y' } } }))
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(fibers.length, 1)
+    assert.ok(logged.some(line => line.includes('释放 MCP server "a" 失败')))
+    assert.ok(logged.some(line => line.includes('释放失败，本轮跳过重挂')))
+  } finally {
+    console.error = originalError
+    console.warn = originalWarn
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('同一名字的 dispose 发生在 mount 之前', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const events: string[] = []
+    const { ctx } = fakeCtx([], { events })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+    runtime.track(fakeAgent(ctx), undefined, [])
+    assert.equal((await runtime.refresh('s1')).ok, true)
+
+    // 配置变更触发 remount：事件顺序必须是先释放旧 fiber，再挂新 fiber。
+    events.length = 0
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'y' } } }))
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.deepEqual(events, ['dispose:a', 'mount:a'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
