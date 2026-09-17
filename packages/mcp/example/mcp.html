@@ -335,6 +335,33 @@ body {
   color: var(--dsw-alias-label-caption);
 }
 
+/* 分组标题右侧：来源路径 + 卸载按钮（min-width:0 让长路径继续省略号收尾） */
+.dsh-mcp-group-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 卸载：默认与「来源」同色的弱按钮；进入确认态才用警示色 */
+.dsh-mcp-unload {
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dsh-mcp-unload:hover:not(:disabled) { color: var(--dsw-alias-label-secondary); }
+.dsh-mcp-unload[data-confirm="true"] { color: var(--dsw-alias-state-error-primary); font-weight: 500; }
+.dsh-mcp-unload:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+
 .dsh-mcp-list {
   display: flex;
   flex-direction: column;
@@ -526,6 +553,7 @@ body {
   上方标签条由 harness 提供、不由本插件控制，此处仅示意上下文。
   三个工具的差别：<code>A</code> 两个文字按钮平铺；<code>B</code> 标题 + 计数在左、图标操作在右；
   <code>C</code> 在 B 基础上把「添加」改成列表末尾的虚线行。
+  分组标题右侧的「卸载」按钮为纯展示（演示页没有宿主），全局共享刻意不给入口。
 </footer>
 
 <script>
@@ -614,6 +642,8 @@ const T = {
   separator: '、',
   expand: '展开',
   collapse: '收起',
+  unload: '卸载',
+  unloadConfirm: '确认卸载',
 };
 
 /** 传输方式对应的 pill 类名（对应 McpView.tsx 的 TRANSPORT_CLASS）。 */
@@ -750,22 +780,51 @@ function refineToolRows(root) {
 }
 
 /**
+ * 卸载按钮（纯展示）：第一次点击进入确认态，第二次才“卸”，失焦即取消。
+ *
+ * @returns {HTMLElement} 卸载按钮
+ */
+function unloadButton() {
+  const button = el('button', 'dsh-mcp-unload', T.unload);
+  button.type = 'button';
+  button.dataset.confirm = 'false';
+  button.title = T.unload;
+  button.addEventListener('click', () => {
+    const confirming = button.dataset.confirm === 'true';
+    button.dataset.confirm = confirming ? 'false' : 'true';
+    button.textContent = confirming ? T.unload : T.unloadConfirm;
+  });
+  button.addEventListener('blur', () => {
+    button.dataset.confirm = 'false';
+    button.textContent = T.unload;
+  });
+  return button;
+}
+
+/**
  * 渲染一个来源分组；空组返回 null（与 McpView.renderGroup 一致）。
  *
  * @param {string} title - 分组标题
  * @param {{file?: string, servers: Array}} group - 分组数据
+ * @param {boolean} unloadable - 是否可卸载（全局共享为 false，无入口）
  * @returns {HTMLElement|null} 分组节点
  */
-function renderGroup(title, group) {
+function renderGroup(title, group, unloadable) {
   if (group.servers.length === 0) return null;
   const section = el('section', 'dsh-mcp-group');
 
   const head = el('div', 'dsh-mcp-group-head');
   head.append(el('span', 'dsh-mcp-group-title', title));
-  if (group.file !== undefined) {
-    const source = el('span', 'dsh-mcp-group-source');
-    source.append(el('span', 'dsh-mcp-source-label', T.source), document.createTextNode(group.file));
-    head.append(source);
+  if (group.file !== undefined || unloadable === true) {
+    const meta = el('span', 'dsh-mcp-group-meta');
+    if (group.file !== undefined) {
+      const source = el('span', 'dsh-mcp-group-source');
+      source.title = group.file;
+      source.append(el('span', 'dsh-mcp-source-label', T.source), document.createTextNode(group.file));
+      meta.append(source);
+    }
+    if (unloadable === true) meta.append(unloadButton());
+    head.append(meta);
   }
   section.append(head);
 
@@ -804,7 +863,7 @@ function render(state, variant, servers) {
   if (isEmpty) {
     root.append(el('div', 'dsh-mcp-empty', T.empty));
   } else {
-    for (const node of [renderGroup(T.workspace, w), renderGroup(T.manual, m), renderGroup(T.global, g)]) {
+    for (const node of [renderGroup(T.workspace, w, true), renderGroup(T.manual, m, true), renderGroup(T.global, g, false)]) {
       if (node !== null) root.append(node);
     }
   }

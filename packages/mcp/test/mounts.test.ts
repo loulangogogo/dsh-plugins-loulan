@@ -373,3 +373,95 @@ test('运行时不读取 ctx.agents（cordis 对未 inject 的服务访问会抛
   // 空闲保护改由注入的 listAgents 提供，绝不能触碰 ctx.agents（fakeCtx 的 getter 会抛错）。
   assert.equal(runtime.isBusy(), false)
 })
+
+test('unload 拒绝全局共享与未知目标，且不释放任何 fiber', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+    runtime.track(fakeAgent(ctx), file, [])
+    await runtime.refresh('s1')
+    assert.equal(fibers.length, 1)
+
+    // 全局共享是硬拒绝：即使直接调端点也卸不掉。
+    assert.deepEqual(await runtime.unload('s1', 'global'), {
+      ok: false,
+      code: 400,
+      message: '全局共享服务不可卸载',
+    })
+    assert.equal((await runtime.unload('s1', 'nope')).code, 400)
+    assert.equal(fibers[0]?.disposed, false)
+    assert.equal(runtime.read('s1').workspace.servers.length, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('unload 工作区是临时停用：刷新会重新读取并挂回', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const events: string[] = []
+    const { ctx } = fakeCtx({ events })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+    runtime.track(fakeAgent(ctx), file, [])
+    await runtime.refresh('s1')
+    assert.equal(runtime.read('s1').workspace.servers.length, 1)
+
+    // 工作区挂载名带 agent 唯一后缀，事件里也是这个名字。
+    const mountedName = `a_${agentToken('s1')}`
+    assert.equal((await runtime.unload('s1', 'workspace')).ok, true)
+    assert.deepEqual(runtime.read('s1').workspace.servers, [])
+    assert.ok(events.includes(`dispose:${mountedName}`))
+
+    // 临时停用：来源仍在，刷新重新读取该文件并挂回。
+    events.length = 0
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(runtime.read('s1').workspace.servers.length, 1)
+    assert.ok(events.includes(`mount:${mountedName}`))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('unload 手动添加会连上传内容一起清掉，刷新不再带回', async () => {
+  const { ctx, fibers } = fakeCtx()
+  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+  runtime.track(fakeAgent(ctx, 's1', '/proj'), undefined, [])
+  const added = await runtime.addUpload('s1', 'extra.json', '{"mcpServers":{"u":{"command":"x"}}}')
+  assert.equal(added.ok, true)
+  assert.equal(runtime.read('s1').manual.servers.length, 1)
+  assert.equal(fibers.length, 1)
+
+  assert.equal((await runtime.unload('s1', 'manual')).ok, true)
+  assert.deepEqual(runtime.read('s1').manual.servers, [])
+  assert.equal(fibers[0]?.disposed, true)
+
+  // 上传内容已丢弃，刷新不会把手动服务带回来。
+  assert.equal((await runtime.refresh('s1')).ok, true)
+  assert.deepEqual(runtime.read('s1').manual.servers, [])
+  assert.equal(fibers.length, 1)
+})
+
+test('unload 对未跟踪会话 400、对运行中会话 409 且不释放', async () => {
+  const untracked = createMountsRuntime({ ctx: fakeCtx().ctx, resolveGlobalFile: () => undefined })
+  assert.deepEqual(await untracked.unload('nope', 'workspace'), {
+    ok: false,
+    code: 400,
+    message: '会话未加载 MCP 服务，无法卸载',
+  })
+
+  const agents = [{ status: 'running' }]
+  const { ctx, fibers } = fakeCtx()
+  const busy = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined, listAgents: () => agents })
+  busy.track(fakeAgent(ctx), undefined, [])
+  assert.deepEqual(await busy.unload('s1', 'workspace'), {
+    ok: false,
+    code: 409,
+    message: '有会话正在运行，请稍后再卸载',
+  })
+  assert.equal(fibers.length, 0)
+})

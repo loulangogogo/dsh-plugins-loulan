@@ -1,8 +1,10 @@
 /**
- * @fileoverview 「MCP」视图的数据源与控制面：拉取端点、刷新、上传添加（不依赖 React）。
+ * @fileoverview 「MCP」视图的数据源与控制面：拉取端点、刷新、上传添加、卸载分组（不依赖 React）。
  */
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { McpMountedData, McpMountGroup, McpServerEntry } from '../contract.js'
+import type {
+  McpMountedData, McpMountGroup, McpServerEntry, UnloadableMountGroup,
+} from '../contract.js'
 
 /** 视图快照：端点返回的载荷；null 表示尚未取得。 */
 export type McpSnapshot = McpMountedData | null
@@ -21,6 +23,8 @@ export interface MountControlIo {
   refresh: (sessionId: string) => Promise<unknown>
   /** 上传添加（POST /add）。 */
   add: (sessionId: string, name: string, content: string) => Promise<unknown>
+  /** 卸载某个来源分组（POST /unload）；全局共享不在可卸载范围内。 */
+  unload: (sessionId: string, group: UnloadableMountGroup) => Promise<unknown>
 }
 
 /** 某会话的数据源与控制动作。 */
@@ -40,6 +44,13 @@ export interface MountControl {
    * @returns 成功为 { ok: true }；失败携带可展示的原因
    */
   addUpload(file: { name: string; content: string }): Promise<MountControlResult>
+  /**
+   * 卸载某个来源分组（本工作区为临时停用，刷新会挂回；手动添加会连内容一起清掉）。
+   *
+   * @param group - 目标分组：workspace 或 manual
+   * @returns 成功为 { ok: true }；失败携带可展示的原因
+   */
+  unload(group: UnloadableMountGroup): Promise<MountControlResult>
 }
 
 /**
@@ -222,5 +233,6 @@ export function createMountControl(sessionId: string, io: MountControlIo): Mount
     source: createLazySource(sessionId, io.fetchMounts, store),
     refresh: () => run(() => io.refresh(sessionId)),
     addUpload: file => run(() => io.add(sessionId, file.name, file.content)),
+    unload: group => run(() => io.unload(sessionId, group)),
   }
 }

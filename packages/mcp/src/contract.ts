@@ -48,5 +48,11 @@ export const REFRESH_ROUTE_PATH = `${ROUTE_PREFIX}/refresh`
 /** 添加端点路径（POST：上传 .mcp.json 内容并挂到当前会话）。 */
 export const ADD_ROUTE_PATH = `${ROUTE_PREFIX}/add`
 
+/** 卸载端点路径（POST：卸载本会话的一个来源分组；全局共享不可卸载）。 */
+export const UNLOAD_ROUTE_PATH = `${ROUTE_PREFIX}/unload`
+
+/** 可卸载的来源分组：全局共享刻意不在其中（只能靠重启改变）。 */
+export type UnloadableMountGroup = 'workspace' | 'manual'
+
 /** 上传文件内容的字节上限（256 KiB）：超出即拒绝。 */
 export const MAX_UPLOAD_BYTES = 262144

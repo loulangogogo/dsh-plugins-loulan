@@ -28,6 +28,8 @@ export const zh = {
   'group.workspace': '本工作区',
   'group.manual': '手动添加',
   'group.global': '全局共享',
+  'group.unload': '卸载',
+  'group.unloadConfirm': '确认卸载',
   'source': '来源',
   'tools.unavailable': '工具列表暂不可用',
   'tools.separator': '、',
@@ -35,6 +37,7 @@ export const zh = {
   'tools.collapse': '收起',
   'error.refreshFailed': '刷新失败',
   'error.addFailed': '添加失败',
+  'error.unloadFailed': '卸载失败',
 } as const
 
 /** 词典键。 */
@@ -52,6 +55,8 @@ export const en: Record<McpKey, string> = {
   'group.workspace': 'This workspace',
   'group.manual': 'Manually added',
   'group.global': 'Shared globally',
+  'group.unload': 'Unload',
+  'group.unloadConfirm': 'Confirm unload',
   'source': 'Source',
   'tools.unavailable': 'Tool list unavailable',
   'tools.separator': ', ',
@@ -59,4 +64,5 @@ export const en: Record<McpKey, string> = {
   'tools.collapse': 'Collapse',
   'error.refreshFailed': 'Refresh failed',
   'error.addFailed': 'Add failed',
+  'error.unloadFailed': 'Unload failed',
 }

@@ -25,8 +25,9 @@ function fakeIo(over: {
   fetchMounts?: () => Promise<unknown>
   refresh?: () => Promise<unknown>
   add?: (sessionId: string, name: string, content: string) => Promise<unknown>
+  unload?: (sessionId: string, group: string) => Promise<unknown>
 } = {}) {
-  const calls = { add: [] as Array<[string, string, string]> }
+  const calls = { add: [] as Array<[string, string, string]>, unload: [] as Array<[string, string]> }
   return {
     calls,
     io: {
@@ -35,6 +36,10 @@ function fakeIo(over: {
       add: async (sessionId: string, name: string, content: string) => {
         calls.add.push([sessionId, name, content])
         return over.add === undefined ? raw : await over.add(sessionId, name, content)
+      },
+      unload: async (sessionId: string, group: string) => {
+        calls.unload.push([sessionId, group])
+        return over.unload === undefined ? raw : await over.unload(sessionId, group)
       },
     },
   }
@@ -164,5 +169,23 @@ test('动作响应畸形时视为失败且快照不变', async () => {
   control.source.subscribe(() => {})
   await tick()
   assert.deepEqual(await control.refresh(), { ok: false })
+  assert.deepEqual(control.source.getSnapshot(), raw)
+})
+
+test('unload 成功传给端点并更新快照', async () => {
+  const updated = { ...raw, workspace: { servers: [] } }
+  const { io, calls } = fakeIo({ unload: async () => updated })
+  const control = createMountControl('s1', io)
+  assert.deepEqual(await control.unload('workspace'), { ok: true })
+  assert.deepEqual(calls.unload, [['s1', 'workspace']])
+  assert.deepEqual(control.source.getSnapshot(), updated)
+})
+
+test('unload 失败返回 message 且快照不变', async () => {
+  const { io } = fakeIo({ unload: async () => { throw new Error('全局共享服务不可卸载') } })
+  const control = createMountControl('s1', io)
+  control.source.subscribe(() => {})
+  await tick()
+  assert.deepEqual(await control.unload('manual'), { ok: false, message: '全局共享服务不可卸载' })
   assert.deepEqual(control.source.getSnapshot(), raw)
 })

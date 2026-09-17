@@ -9,7 +9,10 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { ADD_ROUTE_PATH, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH } from '../contract.js'
+import {
+  ADD_ROUTE_PATH, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH, UNLOAD_ROUTE_PATH,
+  type UnloadableMountGroup,
+} from '../contract.js'
 import { createMountControl, type MountControl } from './mcp-source.js'
 import { McpView } from './McpView.js'
 import { en, NS, zh } from './locales.js'
@@ -81,6 +84,7 @@ export function apply(ctx: Context): void {
         fetchMounts,
         refresh: id => postJson(REFRESH_ROUTE_PATH, { sessionId: id }),
         add: (id, name, content) => postJson(ADD_ROUTE_PATH, { sessionId: id, name, content }),
+        unload: (id, group) => postJson(UNLOAD_ROUTE_PATH, { sessionId: id, group }),
       })
       controls.set(sessionId, control)
     }
@@ -100,6 +104,7 @@ export function apply(ctx: Context): void {
         hooks: { mcp: control.source },
         refresh: () => control.refresh(),
         addUpload: (file: { name: string; content: string }) => control.addUpload(file),
+        unload: (group: UnloadableMountGroup) => control.unload(group),
       }
     },
   }, McpView))

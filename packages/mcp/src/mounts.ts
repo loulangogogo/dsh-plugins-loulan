@@ -133,6 +133,19 @@ export interface MountsRuntime {
    * @returns 成功时携带新载荷；校验失败为 400，空闲保护触发时为 409
    */
   addUpload(sessionId: string | null, name: unknown, content: unknown): Promise<ActionResult>
+  /**
+   * 卸载某会话的一个来源分组。
+   *
+   * 语义（已与用户确认）：
+   * - `global` 一律拒绝（400）——全局共享服务只能靠重启改变，且界面不给入口；
+   * - `workspace` 为**临时停用**：释放句柄但保留来源，下一次刷新会重新读取并挂回；
+   * - `manual` 会**连同保留的上传内容一起丢弃**，刷新不会带回。
+   *
+   * @param sessionId - 会话 id；缺失为 null
+   * @param group - 目标分组；仅 workspace / manual 合法
+   * @returns 成功时携带新载荷；目标不合法或会话未跟踪为 400，空闲保护为 409
+   */
+  unload(sessionId: string | null, group: unknown): Promise<ActionResult>
 }
 
 /** 单个会话的挂载状态。 */
@@ -369,6 +382,34 @@ export function createMountsRuntime(options: {
       )
       record.uploads.push({ name, content })
       record.uploadHandles.push(...handles)
+      return { ok: true, data: payloadOf(record) }
+    },
+    unload: async (sessionId, group) => {
+      const record = sessionId === null || sessionId.length === 0 ? undefined : sessions.get(sessionId)
+      if (record === undefined) return { ok: false, code: 400, message: '会话未加载 MCP 服务，无法卸载' }
+      // 目标合法性先于空闲保护：全局共享永远是 400，不会被暂时的 409 掩盖。
+      if (group === 'global') return { ok: false, code: 400, message: '全局共享服务不可卸载' }
+      if (group !== 'workspace' && group !== 'manual') {
+        return { ok: false, code: 400, message: '未知的卸载目标' }
+      }
+      if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再卸载' }
+
+      if (group === 'workspace') {
+        // 临时停用：只释放句柄，保留 workspaceFile，刷新会重新读取并挂回。
+        const failed = await disposeHandles(record.workspaceHandles)
+        warnDisposeFailures(failed)
+        record.workspaceHandles = record.workspaceHandles.filter(
+          handle => failed.has(handle.mounted.serverName),
+        )
+      } else {
+        // 手动添加：连保留的上传内容一起丢弃，刷新不会带回。
+        const failed = await disposeHandles(record.uploadHandles)
+        warnDisposeFailures(failed)
+        record.uploadHandles = record.uploadHandles.filter(
+          handle => failed.has(handle.mounted.serverName),
+        )
+        record.uploads = []
+      }
       return { ok: true, data: payloadOf(record) }
     },
   }

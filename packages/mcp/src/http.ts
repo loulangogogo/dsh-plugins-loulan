@@ -2,11 +2,12 @@
  * @fileoverview 「MCP」标签页的 HTTP 端点。
  *
  * 单一 prefix 路由按 url.pathname 分派：GET /mounts 读取清单、POST /refresh 刷新、
- * POST /add 上传添加。所有响应均为 JSON 且禁止缓存；请求体读取上限在内容上限之上
- * 预留 JSON 外壳与转义开销，内容本身的字节上限仍由 MAX_UPLOAD_BYTES 约束。
+ * POST /add 上传添加、POST /unload 卸载某个来源分组。所有响应均为 JSON 且禁止缓存；
+ * 请求体读取上限在内容上限之上预留 JSON 外壳与转义开销，内容本身的字节上限仍由
+ * MAX_UPLOAD_BYTES 约束。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { ADD_ROUTE_PATH, MAX_UPLOAD_BYTES, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH } from './contract.js'
+import { ADD_ROUTE_PATH, MAX_UPLOAD_BYTES, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH, UNLOAD_ROUTE_PATH } from './contract.js'
 import type { ActionResult, MountsRuntime } from './mounts.js'
 import { isRecord } from './parse.js'
 
@@ -164,6 +165,14 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, runtime: Moun
     const payload = isRecord(parsed) ? parsed : {}
     const bodySessionId = typeof payload.sessionId === 'string' ? payload.sessionId : sessionId
     return sendResult(res, await runtime.addUpload(bodySessionId, payload.name, payload.content))
+  }
+
+  if (url.pathname === UNLOAD_ROUTE_PATH) {
+    if (req.method !== 'POST') return sendEmpty(res, 405)
+    // 卸载只需要 sessionId 与目标分组，请求体很小，按可选体读取（查询串写法兼容）。
+    const body = await readOptionalJsonRecord(req)
+    const id = typeof body.sessionId === 'string' ? body.sessionId : sessionId
+    return sendResult(res, await runtime.unload(id, body.group))
   }
 
   return sendEmpty(res, 404)

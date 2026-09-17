@@ -142,6 +142,48 @@ const CSS = `
   min-width: 0;
 }
 
+/* 分组标题右侧：来源路径 + 卸载按钮（min-width:0 让长路径继续省略号收尾） */
+.dsh-mcp-group-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 卸载：默认与「来源」同色的弱按钮；进入确认态才用警示色 */
+.dsh-mcp-unload {
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dsh-mcp-unload:hover:not(:disabled) {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dsh-mcp-unload[data-confirm="true"] {
+  color: var(--dsw-alias-state-error-primary);
+  font-weight: 500;
+}
+
+.dsh-mcp-unload:disabled {
+  color: var(--dsw-alias-label-caption);
+  cursor: default;
+}
+
+.dsh-mcp-unload:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
 .dsh-mcp-group-title {
   font-size: 13px;
   line-height: 24px;

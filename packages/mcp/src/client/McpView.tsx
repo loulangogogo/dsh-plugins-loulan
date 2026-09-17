@@ -6,12 +6,12 @@ import type { ChangeEvent } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { McpMountGroup, McpTransport } from '../contract.js'
+import type { McpMountGroup, McpTransport, UnloadableMountGroup } from '../contract.js'
 import type { McpSnapshot, MountControlResult } from './mcp-source.js'
 import { toolsText } from './mcp-source.js'
 import { NS } from './locales.js'
 
-/** 注册侧注入面：按会话绑定的快照钩子与两个控制动作。 */
+/** 注册侧注入面：按会话绑定的快照钩子与三个控制动作。 */
 export interface McpViewInjected {
   hooks: {
     /** 绑定为 useMcp 的当前会话快照源。 */
@@ -21,6 +21,8 @@ export interface McpViewInjected {
   refresh: () => Promise<MountControlResult>
   /** 添加：上传 .mcp.json 内容并挂到当前会话。 */
   addUpload: (file: { name: string; content: string }) => Promise<MountControlResult>
+  /** 卸载某个来源分组；全局共享不在可卸载范围内。 */
+  unload: (group: UnloadableMountGroup) => Promise<MountControlResult>
 }
 
 /** 视图组件 props。 */
@@ -53,6 +55,10 @@ interface GroupLabels {
   expand: string
   /** 收起。 */
   collapse: string
+  /** 卸载。 */
+  unload: string
+  /** 确认卸载。 */
+  unloadConfirm: string
 }
 
 /** 刷新图标：线性描边，随文字颜色。 */
@@ -85,12 +91,49 @@ function PlusIcon() {
 }
 
 /**
+ * 分组的卸载按钮：第一次点击进入确认态，第二次才真正卸载；失焦即取消确认。
+ *
+ * @param props - 文案、禁用状态与确认后的回调
+ * @returns 卸载按钮
+ */
+function UnloadButton({ label, confirmLabel, disabled, onConfirm }: {
+  label: string
+  confirmLabel: string
+  disabled: boolean
+  onConfirm: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const text = confirming ? confirmLabel : label
+  return (
+    <button
+      type="button"
+      className="dsh-mcp-unload"
+      data-confirm={confirming}
+      disabled={disabled}
+      title={text}
+      aria-label={text}
+      onBlur={() => { setConfirming(false) }}
+      onClick={() => {
+        if (!confirming) {
+          setConfirming(true)
+          return
+        }
+        setConfirming(false)
+        onConfirm()
+      }}
+    >
+      {text}
+    </button>
+  )
+}
+
+/**
  * 一个服务的工具名：默认折到 {@link TOOLS_CLAMP_LINES} 行，真实溢出时才给「展开／收起」。
  *
  * 溢出判定用「未折行时的高度是否超过 N 行」而不是比较 scrollHeight 与 clientHeight：
  * 折行时 `overflow: hidden` 会让两者失真，宽度变化后无法重新判断。
  *
- * @param props - 工具名与文案
+ * @param props - 工具名与分组文案
  * @returns 工具名行
  */
 function ToolsRow({ tools, labels }: { tools: readonly string[]; labels: GroupLabels }) {
@@ -154,21 +197,45 @@ function ToolsRow({ tools, labels }: { tools: readonly string[]; labels: GroupLa
  * @param title - 分组标题（已本地化）
  * @param group - 分组数据
  * @param labels - 分组内文案
+ * @param pending - 是否有控制动作在进行（进行中禁用卸载）
+ * @param onUnload - 卸载回调；缺省表示该分组不可卸载（全局共享）
  * @returns 分组节点；空组返回 null
  */
-function renderGroup(title: string, group: McpMountGroup, labels: GroupLabels) {
+function renderGroup(
+  title: string,
+  group: McpMountGroup,
+  labels: GroupLabels,
+  pending: boolean,
+  onUnload?: () => void,
+) {
   if (group.servers.length === 0) return null
   return (
     <section className="dsh-mcp-group">
       <div className="dsh-mcp-group-head">
         <span className="dsh-mcp-group-title">{title}</span>
-        {group.file === undefined
+        {group.file === undefined && onUnload === undefined
           ? null
           : (
-            // title 承载完整路径：窄容器下文本会以省略号收尾，悬停仍可读到全路径。
-            <span className="dsh-mcp-group-source" title={group.file}>
-              <span className="dsh-mcp-source-label">{labels.source}</span>
-              {group.file}
+            <span className="dsh-mcp-group-meta">
+              {group.file === undefined
+                ? null
+                : (
+                  // title 承载完整路径：窄容器下文本以省略号收尾，悬停仍可读到全路径。
+                  <span className="dsh-mcp-group-source" title={group.file}>
+                    <span className="dsh-mcp-source-label">{labels.source}</span>
+                    {group.file}
+                  </span>
+                )}
+              {onUnload === undefined
+                ? null
+                : (
+                  <UnloadButton
+                    label={labels.unload}
+                    confirmLabel={labels.unloadConfirm}
+                    disabled={pending}
+                    onConfirm={onUnload}
+                  />
+                )}
             </span>
           )}
       </div>
@@ -193,11 +260,12 @@ function renderGroup(title: string, group: McpMountGroup, labels: GroupLabels) {
  * 渲染「MCP」视图。
  *
  * 头部始终可见（空态下也能刷新/添加）；分组顺序为本工作区 → 手动添加 → 全局共享。
+ * 前两组可卸载，全局共享不给入口（服务端同样拒绝）。
  *
- * @param props - 视图 props（含 useMcp 钩子、翻译函数 t 与两个控制动作）
+ * @param props - 视图 props（含 useMcp 钩子、翻译函数 t 与三个控制动作）
  * @returns 视图头部与分组清单（或空态）
  */
-export function McpView({ useMcp, t, refresh, addUpload }: McpViewProps) {
+export function McpView({ useMcp, t, refresh, addUpload, unload }: McpViewProps) {
   const snapshot = useMcp(value => value)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -246,7 +314,10 @@ export function McpView({ useMcp, t, refresh, addUpload }: McpViewProps) {
     toolsSeparator: t('tools.separator'),
     expand: t('tools.expand'),
     collapse: t('tools.collapse'),
+    unload: t('group.unload'),
+    unloadConfirm: t('group.unloadConfirm'),
   }
+  const unloadFailed = t('error.unloadFailed')
 
   return (
     <div className="dsh-mcp-root">
@@ -284,9 +355,22 @@ export function McpView({ useMcp, t, refresh, addUpload }: McpViewProps) {
         ? <div className="dsh-mcp-empty">{t('empty')}</div>
         : (
           <>
-            {renderGroup(t('group.workspace'), data.workspace, labels)}
-            {renderGroup(t('group.manual'), data.manual, labels)}
-            {renderGroup(t('group.global'), data.global, labels)}
+            {renderGroup(
+              t('group.workspace'),
+              data.workspace,
+              labels,
+              pending,
+              () => { run(unloadFailed, () => unload('workspace')) },
+            )}
+            {renderGroup(
+              t('group.manual'),
+              data.manual,
+              labels,
+              pending,
+              () => { run(unloadFailed, () => unload('manual')) },
+            )}
+            {/* 全局共享刻意不给卸载入口：服务端亦拒绝 group=global。 */}
+            {renderGroup(t('group.global'), data.global, labels, pending)}
           </>
         )}
     </div>

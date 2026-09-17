@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ADD_ROUTE_PATH, MAX_UPLOAD_BYTES, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH } from '../src/contract.js'
+import {
+  ADD_ROUTE_PATH, MAX_UPLOAD_BYTES, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH, UNLOAD_ROUTE_PATH,
+} from '../src/contract.js'
 import { createMountsHandler } from '../src/http.js'
 import type { McpMountedData } from '../src/contract.js'
 import type { ActionResult, MountsRuntime } from '../src/mounts.js'
@@ -21,11 +23,15 @@ const globalOnly: McpMountedData = { global: globalGroup, workspace: { servers: 
 /**
  * 构造 runtime 桩：记录动作入参，动作结果可注入。
  *
- * @param options - 覆盖 refresh / addUpload 的返回值
+ * @param options - 覆盖 refresh / addUpload / unload 的返回值
  * @returns 运行时桩与调用记录
  */
-function fakeRuntime(options: { refresh?: ActionResult; add?: ActionResult } = {}) {
-  const calls = { refresh: [] as Array<string | null>, add: [] as Array<[string | null, unknown, unknown]> }
+function fakeRuntime(options: { refresh?: ActionResult; add?: ActionResult; unload?: ActionResult } = {}) {
+  const calls = {
+    refresh: [] as Array<string | null>,
+    add: [] as Array<[string | null, unknown, unknown]>,
+    unload: [] as Array<[string | null, unknown]>,
+  }
   const runtime: MountsRuntime = {
     seedGlobal: () => {},
     globalGroup: () => globalGroup,
@@ -41,6 +47,10 @@ function fakeRuntime(options: { refresh?: ActionResult; add?: ActionResult } = {
     addUpload: async (sessionId, name, content) => {
       calls.add.push([sessionId, name, content])
       return options.add ?? { ok: true, data: work }
+    },
+    unload: async (sessionId, group) => {
+      calls.unload.push([sessionId, group])
+      return options.unload ?? { ok: true, data: work }
     },
   }
   return { runtime, calls }
@@ -233,4 +243,30 @@ test('handler 对方法不匹配返回 405 且无响应体', async () => {
     assert.equal(res.statusCode, 405)
     assert.equal(res.body, '')
   }
+})
+
+test('POST /unload 把 sessionId 与 group 交给运行时（body 传参）', async () => {
+  const { runtime, calls } = fakeRuntime()
+  const res = fakeRes()
+  const body = JSON.stringify({ sessionId: 's1', group: 'workspace' })
+  createMountsHandler(runtime)(
+    fakeReq({ method: 'POST', url: UNLOAD_ROUTE_PATH, body }) as never,
+    res as never,
+  )
+  await tick()
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(calls.unload, [['s1', 'workspace']])
+})
+
+test('POST /unload 的 400 文案原样写回（全局共享不可卸载）', async () => {
+  const { runtime } = fakeRuntime({ unload: { ok: false, code: 400, message: '全局共享服务不可卸载' } })
+  const res = fakeRes()
+  const body = JSON.stringify({ sessionId: 's1', group: 'global' })
+  createMountsHandler(runtime)(
+    fakeReq({ method: 'POST', url: UNLOAD_ROUTE_PATH, body }) as never,
+    res as never,
+  )
+  await tick()
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(JSON.parse(res.body), { error: '全局共享服务不可卸载' })
 })
