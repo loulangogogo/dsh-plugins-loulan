@@ -35,9 +35,17 @@ export const inject = ['tools']
  * @param config - 插件配置（cwd 指定 .dsh 根目录）
  */
 export async function apply(ctx: Context, config: Config) {
+  // 0. 空闲保护需要枚举存活 agent；`agents` 是**可选**依赖：本插件未在 inject 中声明它，
+  //    直接读 ctx.agents 会被 cordis 拒绝，故经 ctx.inject 拿到服务后缓存取值函数。
+  let listAgents: () => readonly { readonly status: string }[] = () => []
+  ctx.inject(['agents'], (scope) => {
+    listAgents = () => scope.agents.list()
+    scope.effect(() => () => { listAgents = () => [] }, 'dsh-loulan-mcp: agents probe')
+  })
+
   // 1. 启动时：挂载全局 .dsh 根 .mcp.json；运行时记录句柄，并持有「重新发现全局文件」的解析函数。
   const rootStart = config.cwd || dshHome()
-  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => findMcpJson(rootStart) })
+  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => findMcpJson(rootStart), listAgents })
   const rootFile = findMcpJson(rootStart)
   const handles = rootFile ? await mountFile(ctx, rootFile) : []
   runtime.seedGlobal(handles)

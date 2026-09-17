@@ -156,10 +156,18 @@ interface SessionRecord {
  * @returns 运行时实例
  */
 export function createMountsRuntime(options: {
-  /** 插件上下文（全局挂载与 agent 列表的宿主）。 */
+  /** 插件上下文（全局挂载与会话挂载的宿主）。 */
   ctx: Context
   /** 解析当前全局 .mcp.json 路径；不存在返回 undefined。 */
   resolveGlobalFile: () => string | undefined
+  /**
+   * 列出当前存活的 agent（空闲保护用）。
+   *
+   * 必须由调用方经**可选注入**提供：本插件未声明 `agents` 服务，直接读
+   * `ctx.agents` 会被 cordis 拒绝（`cannot get property "agents" without inject`）。
+   * 缺省视为「没有会话在运行」。
+   */
+  listAgents?: () => readonly { readonly status: string }[]
   /** 挂载实现（默认 mountFile），测试可注入桩。 */
   mount?: (
     ctx: Context,
@@ -169,6 +177,7 @@ export function createMountsRuntime(options: {
   ) => Promise<MountedHandle[]>
 }): MountsRuntime {
   const mount = options.mount ?? mountFile
+  const listAgents = options.listAgents ?? ((): readonly { readonly status: string }[] => [])
   const sessions = new Map<string, SessionRecord>()
   /** 当前全局挂载：服务名 → 句柄。 */
   const globalHandles = new Map<string, MountedHandle>()
@@ -177,7 +186,7 @@ export function createMountsRuntime(options: {
   const globalServers = (): MountedServer[] => handlesToServers([...globalHandles.values()])
 
   /** 是否有任何会话正在运行（刷新/添加的空闲保护）。 */
-  const isBusy = (): boolean => options.ctx.agents.list().some(agent => agent.status === 'running')
+  const isBusy = (): boolean => listAgents().some(agent => agent.status === 'running')
 
   /** 由三组明细组装载荷。 */
   const payloadOf = (record: SessionRecord): McpMountedData =>

@@ -22,17 +22,17 @@ interface FakeFiber {
  * ctx.plugin 返回假 fiber（非 thenable 时 allSettled 视作已启动；fail 集合内的名字返回
  * rejected thenable 以模拟启动失败），ctx.tools.schemas 返回空工具表，ctx.agents.list 由用例控制。
  *
- * @param agents - ctx.agents.list() 返回的 agent 列表
+ * ctx 桩**始终**模拟 cordis 的 ReflectService 守卫：本插件未在 inject 中声明 `agents`，
+ * 因此任何对 `ctx.agents` 的访问都会抛错——空闲保护必须走注入的 `listAgents`。
+ *
  * @param options - events 记录挂载/释放顺序；fail 模拟启动失败；failDispose 模拟释放抛错
  * @returns ctx 桩与假 fiber 记录
  */
 function fakeCtx(
-  agents: Array<{ status: string }> = [],
   options: { events?: string[]; fail?: ReadonlySet<string>; failDispose?: ReadonlySet<string> } = {},
 ) {
   const fibers: FakeFiber[] = []
   const ctx = {
-    agents: { list: () => agents },
     tools: { schemas: () => [] },
     plugin: (_plugin: unknown, config: FakeFiber['config']) => {
       const name = String(config.serverName)
@@ -56,6 +56,10 @@ function fakeCtx(
       return handle
     },
   }
+  // 模拟 cordis：访问未声明 inject 的服务属性直接抛错。
+  Object.defineProperty(ctx, 'agents', {
+    get() { throw new Error('cannot get property "agents" without inject') },
+  })
   return { ctx: ctx as unknown as Context, fibers }
 }
 
@@ -142,8 +146,9 @@ test('runtime track 后 read 给出该会话三组载荷，forget 后清空', ()
 })
 
 test('runtime 存在运行中会话时 409 且不动 fiber', async () => {
-  const { ctx, fibers } = fakeCtx([{ status: 'running' }])
-  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+  const agents = [{ status: 'running' }]
+  const { ctx, fibers } = fakeCtx()
+  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined, listAgents: () => agents })
   runtime.track(fakeAgent(ctx), undefined, [])
   assert.equal(runtime.isBusy(), true)
 
@@ -296,7 +301,7 @@ test('启动失败的全局服务仍登记句柄：配置未变时不重复挂�
   try {
     const file = join(dir, '.mcp.json')
     writeFileSync(file, JSON.stringify({ mcpServers: { bad: { command: 'x' } } }))
-    const { ctx, fibers } = fakeCtx([], { fail: new Set(['bad']) })
+    const { ctx, fibers } = fakeCtx({ fail: new Set(['bad']) })
     const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
     runtime.track(fakeAgent(ctx), undefined, [])
 
@@ -322,7 +327,7 @@ test('释放失败的全局服务本轮不再重挂并记录日志', async () =>
   try {
     const file = join(dir, '.mcp.json')
     writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
-    const { ctx, fibers } = fakeCtx([], { failDispose: new Set(['a']) })
+    const { ctx, fibers } = fakeCtx({ failDispose: new Set(['a']) })
     const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
     runtime.track(fakeAgent(ctx), undefined, [])
     assert.equal((await runtime.refresh('s1')).ok, true)
@@ -347,7 +352,7 @@ test('同一名字的 dispose 发生在 mount 之前', async () => {
     const file = join(dir, '.mcp.json')
     writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
     const events: string[] = []
-    const { ctx } = fakeCtx([], { events })
+    const { ctx } = fakeCtx({ events })
     const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
     runtime.track(fakeAgent(ctx), undefined, [])
     assert.equal((await runtime.refresh('s1')).ok, true)
@@ -360,4 +365,11 @@ test('同一名字的 dispose 发生在 mount 之前', async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('运行时不读取 ctx.agents（cordis 对未 inject 的服务访问会抛错）', () => {
+  const { ctx } = fakeCtx()
+  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined, listAgents: () => [] })
+  // 空闲保护改由注入的 listAgents 提供，绝不能触碰 ctx.agents（fakeCtx 的 getter 会抛错）。
+  assert.equal(runtime.isBusy(), false)
 })
