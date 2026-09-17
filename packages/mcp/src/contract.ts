@@ -1,8 +1,8 @@
 /**
- * @fileoverview 「MCP」会话标签页的数据契约：mcp/mounted 会话事件。
+ * @fileoverview 「MCP」会话标签页的数据契约。
  *
- * 该事件为 log-only（不在 SurfaceEventType 内），可持久化、可回放，
- * 永不进入模型上下文。浏览器半侧 type-only 引用本模块。
+ * 数据由 Host 的进程内注册表经只读 HTTP 端点提供（见 http.ts）：不写入会话
+ * 日志、不进入模型上下文。浏览器半侧 type-only 引用本模块。
  */
 
 /** 支持的传输方式。 */
@@ -25,14 +25,11 @@ export interface McpMountGroup {
   servers: McpServerEntry[]
 }
 
-/** mcp/mounted 事件载荷。 */
+/** 挂载清单载荷。 */
 export interface McpMountedData {
   global: McpMountGroup
   workspace: McpMountGroup
 }
 
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    'mcp/mounted': McpMountedData
-  }
-}
+/** 挂载清单只读端点的路径（Host 注册，客户端拉取）。 */
+export const MOUNTS_ROUTE_PATH = '/dsh-loulan-mcp/mounts'

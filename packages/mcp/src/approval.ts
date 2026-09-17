@@ -14,7 +14,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import { findMcpJson } from './discover.js'
 import { agentToken } from './server-name.js'
-import { mountFile, type MountedServer } from './mount.js'
+import { mountFile, buildMountPayload, type MountedServer } from './mount.js'
+import type { MountRegistry } from './registry.js'
 import { buildMountNotice, announceMountNotice } from './notify.js'
 
 /** 单个 agent 的挂载决定状态。 */
@@ -101,26 +102,31 @@ export async function askForApproval(
 }
 
 /**
- * 挂载工作区 .mcp.json 并在会话尚未开始对话时输出用户可见通知。
+ * 挂载工作区 .mcp.json，写入会话级注册表，并在新建会话时输出通知卡片。
  *
- * 通知以命令结果卡片（log-only 会话事件）呈现，不唤醒模型、不进模型上下文；
- * 挂载失败/无成功服务、会话已有消息、或文案为空时不输出。
- * mount 参数可注入桩，便于单测。
+ * 注册表供 HTTP 端点读取；卡片条件保持原样（有工作区挂载且会话尚无消息）。
  *
  * @param agent - 目标 agent
- * @param file - 工作区 .mcp.json 绝对路径
- * @param globalMounts - 全局 .dsh 根已挂载的服务明细（用于一并列出）
- * @param mount - 挂载实现（默认 mountFile）
+ * @param file - 工作区 .mcp.json 绝对路径；无则为 undefined
+ * @param globalMounts - 全局 .dsh 根已挂载的服务明细
+ * @param registry - 会话级注册表
+ * @param mount - 挂载实现（默认 mountFile），可注入桩
  */
-export async function mountAndNotify(
+export async function mountAndRecord(
   agent: Agent,
-  file: string,
+  file: string | undefined,
   globalMounts: MountedServer[],
+  registry: MountRegistry,
   mount: (ctx: Context, file: string, suffix?: string) => Promise<MountedServer[]> = mountFile,
 ): Promise<void> {
-  const work = await mount(agent.ctx, file, agentToken(agent.id))
+  const work = file === undefined ? [] : await mount(agent.ctx, file, agentToken(agent.id))
+
+  const data = buildMountPayload(globalMounts, work)
+  if (data.global.servers.length > 0 || data.workspace.servers.length > 0) {
+    registry.set(agent.id, data)
+  }
+
   if (work.length === 0) return
-  // 会话已经开始对话则不再输出（防 resume 重复、防迟到插入）。
   if (agent.session.surface.nodes.length !== 0) return
   const text = buildMountNotice(globalMounts, work)
   if (text === undefined) return
@@ -128,48 +134,48 @@ export async function mountAndNotify(
 }
 
 /**
- * 注册 agent/created 监听：探测工作区 .mcp.json，命中即自动挂载（不询问）。
+ * 注册 agent/created 监听：探测工作区 .mcp.json，命中即挂载并写入注册表。
  *
- * 与全局 .dsh 根命中同一文件（rootFile）则跳过，避免重复挂载。
- * 挂载为 fire-and-forget：created 监听器异步失败仅被 harness 告警收纳、
- * 不阻断 agent 创建；agent 销毁时挂载随 agent.ctx 作用域自动卸载，无需在此清理。
+ * 即使工作区没有 .mcp.json，只要存在全局共享服务也写入一次，
+ * 以保证端点在任何会话都能反映当前加载情况。
  *
  * @param ctx - 插件上下文
- * @param rootFile - 全局 .dsh 根的 .mcp.json 路径（命中则跳过，避免与全局重复）
- * @param globalMounts - 全局 .dsh 根已挂载的服务明细（用于通知一并列出）
+ * @param rootFile - 全局 .dsh 根的 .mcp.json 路径（命中则跳过工作区挂载）
+ * @param globalMounts - 全局 .dsh 根已挂载的服务明细
+ * @param registry - 会话级注册表
  */
-export function registerAgentCreated(ctx: Context, rootFile: string | undefined, globalMounts: MountedServer[]): void {
+export function registerAgentCreated(
+  ctx: Context,
+  rootFile: string | undefined,
+  globalMounts: MountedServer[],
+  registry: MountRegistry,
+): void {
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
-    if (file === undefined || file === rootFile) return
-
-    // 当前实现：发现工作区 .mcp.json 即自动挂载，并在会话未开始对话时以命令
-    // 结果卡片输出可见通知（log-only，不唤醒模型、不进模型上下文）。
-    console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
-    void mountAndNotify(agent, file, globalMounts).catch((error: unknown) => {
-      console.error(`[dsh-loulan-mcp] 工作区 ${cwd} 挂载/通知失败:`, error)
+    const workFile = file === undefined || file === rootFile ? undefined : file
+    if (workFile === undefined && globalMounts.length === 0) return
+    if (workFile !== undefined) {
+      console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
+    }
+    void mountAndRecord(agent, workFile, globalMounts, registry).catch((error: unknown) => {
+      console.error(`[dsh-loulan-mcp] 工作区 ${cwd} 挂载/记录失败:`, error)
     })
-
-    // === 旧实现（登记"待决定"，配合 agent/request 审批询问后挂载），已停用，保留供恢复 ===
-    // console.log(`[dsh-loulan-mcp] 尝试为工作区 ${cwd} 挂载 .mcp.json`)
-    // if (decisionFor(agent.id) !== undefined) return
-    // setDecision(agent.id, 'pending')
-    // setPending(agent.id, { file })
-    // ============================================================================
   })
 }
 
 /**
- * 注册 agent/disposed 监听：清除该 agent 的决定与待挂载信息。
+ * 注册 agent/disposed 监听：清除该 agent 的决定、待挂载信息与注册表条目。
  *
  * @param ctx - 插件上下文
+ * @param registry - 会话级注册表
  */
-export function registerAgentDisposed(ctx: Context): void {
+export function registerAgentDisposed(ctx: Context, registry: MountRegistry): void {
   ctx.on('agent/disposed', ({ agent }) => {
     clearDecision(agent.id)
     clearPending(agent.id)
+    registry.clear(agent.id)
   })
 }
 
@@ -179,7 +185,8 @@ export function registerAgentDisposed(ctx: Context): void {
  * 自动挂载后工作区 .mcp.json 已在 agent 创建时挂载（见 registerAgentCreated），
  * 不再需要审批询问，故本函数整体注释停用；下方逐行保留原实现，供日后恢复
  * 「询问后挂载」模式。恢复步骤：
- *   1. 取消本注释块，并恢复 registerAgentCreated 函数体中登记的旧逻辑（见其行内注释）；
+ *   1. 取消本注释块，并在 registerAgentCreated 中恢复「登记待决定」的旧逻辑
+ *      （decisionFor/setDecision/setPending）；
  *   2. 在文件头部 import 中补回 readMcpServers；
  *   3. 在 index.ts 中取消 registerAgentRequest 的 import 与调用注释。
  *
