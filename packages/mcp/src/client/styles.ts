@@ -135,18 +135,19 @@ const CSS = `
 
 .dsh-mcp-group-head {
   display: flex;
-  flex-wrap: wrap;
+  /* 单行布局：空间不足时先省略来源路径，卸载按钮始终留在右端 */
+  flex-wrap: nowrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 4px 12px;
   min-width: 0;
 }
 
-/* 分组标题右侧：来源路径 + 卸载按钮（min-width:0 让长路径继续省略号收尾） */
-.dsh-mcp-group-meta {
+/* 分组名与来源路径同排：路径紧跟名称，空间不足时由路径自身省略号收尾 */
+.dsh-mcp-group-heading {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -186,6 +187,7 @@ const CSS = `
 }
 
 .dsh-mcp-group-title {
+  flex: none;
   font-size: 13px;
   line-height: 24px;
   font-weight: 500;
@@ -201,11 +203,6 @@ const CSS = `
   color: var(--dsw-alias-label-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dsh-mcp-source-label {
-  margin-right: 6px;
-  color: var(--dsw-alias-label-caption);
 }
 
 .dsh-mcp-list {

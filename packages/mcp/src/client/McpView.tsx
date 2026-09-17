@@ -46,8 +46,6 @@ const EMPTY_GROUP: McpMountGroup = { servers: [] }
 
 /** 分组渲染所需文案。 */
 interface GroupLabels {
-  /** 「来源」标签。 */
-  source: string
   /** 工具列表不可用文案。 */
   toolsUnavailable: string
   /** 工具名分隔符。 */
@@ -236,34 +234,28 @@ function renderGroup(
   return (
     <section className="dsh-mcp-group">
       <div className="dsh-mcp-group-head">
-        <span className="dsh-mcp-group-title">{title}</span>
-        {group.file === undefined && unload === undefined
+        <span className="dsh-mcp-group-heading">
+          <span className="dsh-mcp-group-title">{title}</span>
+          {group.file === undefined
+            ? null
+            : (
+              // 来源路径紧跟分组名并用括号包裹；title 承载完整路径，
+              // 窄容器下括号内以省略号收尾，悬停仍可读到全路径。
+              <span className="dsh-mcp-group-source" title={group.file}>({group.file})</span>
+            )}
+        </span>
+        {unload === undefined
           ? null
           : (
-            <span className="dsh-mcp-group-meta">
-              {group.file === undefined
-                ? null
-                : (
-                  // title 承载完整路径：窄容器下文本以省略号收尾，悬停仍可读到全路径。
-                  <span className="dsh-mcp-group-source" title={group.file}>
-                    <span className="dsh-mcp-source-label">{labels.source}</span>
-                    {group.file}
-                  </span>
-                )}
-              {unload === undefined
-                ? null
-                : (
-                  <UnloadButton
-                    label={labels.unload}
-                    title={labels.unloadTitle}
-                    description={unload.description}
-                    confirmLabel={labels.unloadConfirm}
-                    cancelLabel={labels.unloadCancel}
-                    disabled={pending}
-                    onConfirm={unload.run}
-                  />
-                )}
-            </span>
+            <UnloadButton
+              label={labels.unload}
+              title={labels.unloadTitle}
+              description={unload.description}
+              confirmLabel={labels.unloadConfirm}
+              cancelLabel={labels.unloadCancel}
+              disabled={pending}
+              onConfirm={unload.run}
+            />
           )}
       </div>
       <ul className="dsh-mcp-list">
@@ -336,7 +328,6 @@ export function McpView({ useMcp, t, refresh, addUpload, unload }: McpViewProps)
   const data = snapshot ?? { global: EMPTY_GROUP, workspace: EMPTY_GROUP, manual: EMPTY_GROUP }
   const total = data.workspace.servers.length + data.manual.servers.length + data.global.servers.length
   const labels: GroupLabels = {
-    source: t('source'),
     toolsUnavailable: t('tools.unavailable'),
     toolsSeparator: t('tools.separator'),
     expand: t('tools.expand'),
