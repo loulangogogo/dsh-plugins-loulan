@@ -37,6 +37,19 @@ export function asStringRecord(value: unknown): Record<string, string> {
 }
 
 /**
+ * 解析 .mcp.json 文本内容，返回其中的 mcpServers（缺失或非对象时视为空对象）。
+ *
+ * JSON 解析失败时抛错，由调用方捕获处理（文件读取与浏览器上传共用本函数）。
+ *
+ * @param text - .mcp.json 的文本内容
+ * @returns mcpServers 映射；无 mcpServers 或结构不正确时返回空对象
+ */
+export function parseMcpServersText(text: string): Record<string, unknown> {
+  const doc: unknown = JSON.parse(text)
+  return isRecord(doc) && isRecord(doc.mcpServers) ? doc.mcpServers : {}
+}
+
+/**
  * 读取并解析 .mcp.json，返回其中的 mcpServers（缺失或非对象时视为空对象）。
  *
  * 读取/JSON 解析失败时抛错，由调用方捕获处理。
@@ -45,6 +58,5 @@ export function asStringRecord(value: unknown): Record<string, string> {
  * @returns mcpServers 映射；文件无 mcpServers 或结构不正确时返回空对象
  */
 export async function readMcpServers(file: string): Promise<Record<string, unknown>> {
-  const doc: unknown = JSON.parse(await readFile(file, 'utf8'))
-  return isRecord(doc) && isRecord(doc.mcpServers) ? doc.mcpServers : {}
+  return parseMcpServersText(await readFile(file, 'utf8'))
 }

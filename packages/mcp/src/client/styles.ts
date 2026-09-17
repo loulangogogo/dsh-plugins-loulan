@@ -23,6 +23,56 @@ const CSS = `
   padding: 1%;
 }
 
+.dsh-mcp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dsh-mcp-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-specific-tip);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.dsh-mcp-button:hover:not(:disabled) {
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.dsh-mcp-button:disabled {
+  color: var(--dsw-alias-label-tertiary);
+  cursor: default;
+}
+
+/* 文件选择器只作为「添加」按钮的隐藏入口：点击 label 即打开系统选文件对话框 */
+.dsh-mcp-file {
+  display: none;
+}
+
+.dsh-mcp-status {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dsh-mcp-error {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-state-error-primary);
+  overflow-wrap: anywhere;
+}
+
 .dsh-mcp-group {
   display: flex;
   flex-direction: column;

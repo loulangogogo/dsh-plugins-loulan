@@ -26,6 +26,31 @@ export interface MountedServer {
 }
 
 /**
+ * 可释放的挂载句柄结构子集。
+ *
+ * ctx.plugin() 返回的 Fiber 恰好满足本结构（dispose 返回 Promise），
+ * 但这里只声明卸载所需的最小能力，避免把 cordis 的完整 Fiber 类型带进契约。
+ */
+export interface Disposable {
+  dispose(): unknown
+}
+
+/**
+ * 一次成功挂载的完整句柄。
+ *
+ * configKey 为映射后配置的 JSON 指纹，只用于「刷新」时比较新旧配置是否变更；
+ * 其中可能含 env / headers 等敏感内容，因此绝不经 HTTP 端点外发。
+ */
+export interface MountedHandle {
+  /** 展示与通知用的挂载明细（tools 在 settleMounts 后填充）。 */
+  mounted: MountedServer
+  /** 插件纤维句柄：dispose 即卸载该 server。 */
+  fiber: Disposable
+  /** 映射后配置的 JSON 指纹（仅内存比较用）。 */
+  configKey: string
+}
+
+/**
  * 把一组已挂载服务映射为展示分组。
  *
  * 来源文件取组内首个条目的 file：同组条目必然来自同一个 .mcp.json。
@@ -44,17 +69,33 @@ export function toMountGroup(mounts: readonly MountedServer[]): McpMountGroup {
 }
 
 /**
+ * 取出一组挂载句柄的展示明细。
+ *
+ * @param handles - 挂载句柄数组
+ * @returns 展示明细数组（顺序与入参一致）
+ */
+export function handlesToServers(handles: readonly MountedHandle[]): MountedServer[] {
+  return handles.map(handle => handle.mounted)
+}
+
+/**
  * 组装挂载清单载荷（供 /dsh-loulan-mcp/mounts 端点返回）。
  *
  * @param globalMounts - 全局 .dsh 根已挂载的服务明细
  * @param workMounts - 工作区已挂载的服务明细
- * @returns 分全局与工作区两组的载荷
+ * @param manualMounts - 本会话手动添加的服务明细
+ * @returns 分全局、工作区、手动添加三组的载荷
  */
 export function buildMountPayload(
   globalMounts: readonly MountedServer[],
   workMounts: readonly MountedServer[],
+  manualMounts: readonly MountedServer[],
 ): McpMountedData {
-  return { global: toMountGroup(globalMounts), workspace: toMountGroup(workMounts) }
+  return {
+    global: toMountGroup(globalMounts),
+    workspace: toMountGroup(workMounts),
+    manual: toMountGroup(manualMounts),
+  }
 }
 
 /**
@@ -82,29 +123,27 @@ function toolNamesForServer(ctx: Context, serverName: string): string[] {
 }
 
 /**
- * 把某个 .mcp.json 文件的 mcpServers 挂载到指定 ctx,返回成功挂载的明细。
+ * 把一组 mcpServers 映射并挂载到指定 ctx,立即返回挂载句柄（不等启动完成）。
  *
- * 解析文件、逐条映射并挂载 mcp-client 实例,统一等待所有实例启动后枚举各 server 工具名。
- * 单个 server 挂载失败不阻断其它 server,也不进入返回结果。
+ * 单个 server 映射或挂载失败不阻断其它 server，也不进入返回结果。
+ * 调用方随后应把句柄交给 settleMounts 等待启动并补全工具名。
  *
- * @param ctx - 挂载目标:全局 ctx(启动时)或 agent.ctx(工作区,agent 局部)
- * @param file - .mcp.json 文件路径
+ * @param ctx - 挂载目标:全局 ctx(启动时)或 agent.ctx(工作区/手动,agent 局部)
+ * @param servers - mcpServers 映射（服务名 → 原始配置）
+ * @param source - 来源标识（.mcp.json 路径或上传文件名），写入明细的 file 字段
+ * @param projectDir - stdio 子进程默认 cwd（.mcp.json 所在目录或会话工作区目录）
  * @param uniqueSuffix - 按 agent 派生唯一后缀,透传给 mapServer
- * @returns 成功挂载的 server 明细数组(含工具名)
+ * @returns 成功挂载的句柄数组（tools 暂为空）
  */
-export async function mountFile(ctx: Context, file: string, uniqueSuffix?: string): Promise<MountedServer[]> {
-  let servers: Record<string, unknown>
-  try {
-    servers = await readMcpServers(file)
-  } catch (error) {
-    console.error(`[dsh-loulan-mcp] 解析 ${file} 失败:`, error)
-    return []
-  }
-
-  console.log(`[dsh-loulan-mcp] 应用 ${file}`)
-  const projectDir = dirname(file)
-  const fibers: { promise: PromiseLike<unknown>; serverName: string; rawName: string; transport: MountedServer['transport'] }[] = []
-
+export function mountServers(
+  ctx: Context,
+  servers: Record<string, unknown>,
+  source: string,
+  projectDir: string,
+  uniqueSuffix?: string,
+): MountedHandle[] {
+  console.log(`[dsh-loulan-mcp] 应用 ${source}`)
+  const handles: MountedHandle[] = []
   for (const [serverName, raw] of Object.entries(servers)) {
     const mapped = mapServer(serverName, raw, projectDir, uniqueSuffix)
     if (!mapped.ok) {
@@ -112,23 +151,70 @@ export async function mountFile(ctx: Context, file: string, uniqueSuffix?: strin
       continue
     }
     try {
-      const promise = ctx.plugin(mcpClient, mapped.config)
-      fibers.push({ promise, serverName: mapped.config.serverName, rawName: serverName, transport: mapped.config.transport })
+      const fiber = ctx.plugin(mcpClient, mapped.config)
+      handles.push({
+        mounted: {
+          serverName: mapped.config.serverName,
+          rawName: serverName,
+          transport: mapped.config.transport,
+          file: source,
+          tools: [],
+        },
+        fiber,
+        configKey: JSON.stringify(mapped.config),
+      })
       console.log(`[dsh-loulan-mcp] 已挂载 MCP server "${mapped.config.serverName}"`)
     } catch (error) {
       console.error(`[dsh-loulan-mcp] 挂载 "${mapped.config.serverName}" 失败:`, error)
     }
   }
+  return handles
+}
 
-  const settled = await Promise.allSettled(fibers.map((f) => f.promise))
-  const result: MountedServer[] = []
+/**
+ * 等待一组挂载句柄的 fiber 启动完成，并为成功者枚举工具名。
+ *
+ * 启动失败的句柄被丢弃（不进入返回值），与「单个失败不阻断其它」的既有语义一致。
+ *
+ * @param ctx - 挂载目标（用于枚举 ctx.tools 中的工具名）
+ * @param handles - mountServers 返回的句柄数组
+ * @returns 启动成功的句柄数组（mounted.tools 已填充）
+ */
+export async function settleMounts(ctx: Context, handles: MountedHandle[]): Promise<MountedHandle[]> {
+  const settled = await Promise.allSettled(handles.map(handle => handle.fiber))
+  const result: MountedHandle[] = []
   settled.forEach((item, index) => {
     if (item.status === 'rejected') {
       console.error('[dsh-loulan-mcp] MCP server 启动失败:', item.reason)
       return
     }
-    const { serverName, rawName, transport } = fibers[index]
-    result.push({ serverName, rawName, transport, file, tools: toolNamesForServer(ctx, serverName) })
+    const handle = handles[index]
+    result.push({
+      ...handle,
+      mounted: { ...handle.mounted, tools: toolNamesForServer(ctx, handle.mounted.serverName) },
+    })
   })
   return result
+}
+
+/**
+ * 把某个 .mcp.json 文件的 mcpServers 挂载到指定 ctx,返回启动成功的挂载句柄。
+ *
+ * 解析文件、逐条映射并挂载 mcp-client 实例,统一等待所有实例启动后枚举各 server 工具名。
+ * 单个 server 挂载失败不阻断其它 server,也不进入返回结果。
+ *
+ * @param ctx - 挂载目标:全局 ctx(启动时)或 agent.ctx(工作区,agent 局部)
+ * @param file - .mcp.json 文件路径
+ * @param uniqueSuffix - 按 agent 派生唯一后缀,透传给 mapServer
+ * @returns 成功挂载的句柄数组(含工具名);读文件失败返回空数组
+ */
+export async function mountFile(ctx: Context, file: string, uniqueSuffix?: string): Promise<MountedHandle[]> {
+  let servers: Record<string, unknown>
+  try {
+    servers = await readMcpServers(file)
+  } catch (error) {
+    console.error(`[dsh-loulan-mcp] 解析 ${file} 失败:`, error)
+    return []
+  }
+  return settleMounts(ctx, mountServers(ctx, servers, file, dirname(file), uniqueSuffix))
 }

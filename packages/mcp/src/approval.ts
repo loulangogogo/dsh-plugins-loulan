@@ -14,8 +14,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import { findMcpJson } from './discover.js'
 import { agentToken } from './server-name.js'
-import { mountFile, buildMountPayload, type MountedServer } from './mount.js'
-import type { MountRegistry } from './registry.js'
+import { mountFile, handlesToServers, type MountedHandle } from './mount.js'
+import type { MountsRuntime } from './mounts.js'
 import { buildMountNotice, announceMountNotice } from './notify.js'
 
 /** 单个 agent 的挂载决定状态。 */
@@ -102,80 +102,73 @@ export async function askForApproval(
 }
 
 /**
- * 挂载工作区 .mcp.json，写入会话级注册表，并在新建会话时输出通知卡片。
+ * 挂载工作区 .mcp.json，写入运行时记录，并在新建会话时输出通知卡片。
  *
- * 注册表供 HTTP 端点读取；卡片条件保持原样（有工作区挂载且会话尚无消息）。
+ * 运行时记录供 HTTP 端点读取；卡片条件保持原样（有工作区挂载且会话尚无消息）。
  *
  * @param agent - 目标 agent
  * @param file - 工作区 .mcp.json 绝对路径；无则为 undefined
- * @param globalMounts - 全局 .dsh 根已挂载的服务明细
- * @param registry - 会话级注册表
+ * @param runtime - 挂载运行时（记录句柄并读出全局明细）
  * @param mount - 挂载实现（默认 mountFile），可注入桩
  */
 export async function mountAndRecord(
   agent: Agent,
   file: string | undefined,
-  globalMounts: MountedServer[],
-  registry: MountRegistry,
-  mount: (ctx: Context, file: string, suffix?: string) => Promise<MountedServer[]> = mountFile,
+  runtime: MountsRuntime,
+  mount: (ctx: Context, file: string, suffix?: string) => Promise<MountedHandle[]> = mountFile,
 ): Promise<void> {
-  const work = file === undefined ? [] : await mount(agent.ctx, file, agentToken(agent.id))
+  const handles = file === undefined ? [] : await mount(agent.ctx, file, agentToken(agent.id))
+  runtime.track(agent, file, handles)
 
-  const data = buildMountPayload(globalMounts, work)
-  if (data.global.servers.length > 0 || data.workspace.servers.length > 0) {
-    registry.set(agent.id, data)
-  }
-
+  const work = handlesToServers(handles)
   if (work.length === 0) return
   if (agent.session.surface.nodes.length !== 0) return
-  const text = buildMountNotice(globalMounts, work)
+  const text = buildMountNotice(runtime.globalServers(), work)
   if (text === undefined) return
   announceMountNotice(agent, text)
 }
 
 /**
- * 注册 agent/created 监听：探测工作区 .mcp.json，命中即挂载并写入注册表。
+ * 注册 agent/created 监听：探测工作区 .mcp.json，命中即挂载并写入运行时记录。
  *
  * 即使工作区没有 .mcp.json，只要存在全局共享服务也写入一次，
  * 以保证端点在任何会话都能反映当前加载情况。
  *
  * @param ctx - 插件上下文
  * @param rootFile - 全局 .dsh 根的 .mcp.json 路径（命中则跳过工作区挂载）
- * @param globalMounts - 全局 .dsh 根已挂载的服务明细
- * @param registry - 会话级注册表
+ * @param runtime - 挂载运行时
  */
 export function registerAgentCreated(
   ctx: Context,
   rootFile: string | undefined,
-  globalMounts: MountedServer[],
-  registry: MountRegistry,
+  runtime: MountsRuntime,
 ): void {
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
     if (cwd === undefined) return
     const file = findMcpJson(cwd)
     const workFile = file === undefined || file === rootFile ? undefined : file
-    if (workFile === undefined && globalMounts.length === 0) return
+    if (workFile === undefined && runtime.globalGroup().servers.length === 0) return
     if (workFile !== undefined) {
       console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
     }
-    void mountAndRecord(agent, workFile, globalMounts, registry).catch((error: unknown) => {
+    void mountAndRecord(agent, workFile, runtime).catch((error: unknown) => {
       console.error(`[dsh-loulan-mcp] 工作区 ${cwd} 挂载/记录失败:`, error)
     })
   })
 }
 
 /**
- * 注册 agent/disposed 监听：清除该 agent 的决定、待挂载信息与注册表条目。
+ * 注册 agent/disposed 监听：清除该 agent 的决定、待挂载信息与运行时记录。
  *
  * @param ctx - 插件上下文
- * @param registry - 会话级注册表
+ * @param runtime - 挂载运行时
  */
-export function registerAgentDisposed(ctx: Context, registry: MountRegistry): void {
+export function registerAgentDisposed(ctx: Context, runtime: MountsRuntime): void {
   ctx.on('agent/disposed', ({ agent }) => {
     clearDecision(agent.id)
     clearPending(agent.id)
-    registry.clear(agent.id)
+    runtime.forget(agent.id)
   })
 }
 

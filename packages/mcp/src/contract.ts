@@ -1,9 +1,9 @@
 /**
  * @fileoverview 「MCP」会话标签页的数据契约。
  *
- * 数据由 Host 的进程内注册表经只读 HTTP 端点提供（见 http.ts）：不写入会话
- * 日志、不进入模型上下文。类型供 Host 与浏览器半侧共享；MOUNTS_ROUTE_PATH
- * 为 Host 注册与客户端拉取共用的路由常量。
+ * 数据由 Host 的进程内运行时经 HTTP 端点提供（见 http.ts）：不写入会话
+ * 日志、不进入模型上下文。类型供 Host 与浏览器半侧共享；路由常量与上传上限
+ * 为 Host 注册与客户端调用共用的契约。
  */
 
 /** 支持的传输方式。 */
@@ -26,11 +26,27 @@ export interface McpMountGroup {
   servers: McpServerEntry[]
 }
 
-/** 挂载清单载荷。 */
+/** 挂载清单载荷（三组来源）。 */
 export interface McpMountedData {
+  /** .dsh 根目录的全局共享服务。 */
   global: McpMountGroup
+  /** 本会话工作区 .mcp.json 的服务。 */
   workspace: McpMountGroup
+  /** 本会话经「添加」上传的手动挂载服务。 */
+  manual: McpMountGroup
 }
 
+/** 本插件 HTTP 端点的公共前缀（Host 以 prefix 方式注册，客户端据此调用）。 */
+export const ROUTE_PREFIX = '/dsh-loulan-mcp'
+
 /** 挂载清单只读端点的路径（Host 注册，客户端拉取）。 */
-export const MOUNTS_ROUTE_PATH = '/dsh-loulan-mcp/mounts'
+export const MOUNTS_ROUTE_PATH = `${ROUTE_PREFIX}/mounts`
+
+/** 刷新端点路径（POST：全局增量重挂 + 本会话重挂）。 */
+export const REFRESH_ROUTE_PATH = `${ROUTE_PREFIX}/refresh`
+
+/** 添加端点路径（POST：上传 .mcp.json 内容并挂到当前会话）。 */
+export const ADD_ROUTE_PATH = `${ROUTE_PREFIX}/add`
+
+/** 上传文件内容的字节上限（256 KiB）：超出即拒绝。 */
+export const MAX_UPLOAD_BYTES = 262144

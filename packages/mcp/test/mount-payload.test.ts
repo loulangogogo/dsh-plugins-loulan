@@ -29,20 +29,24 @@ test('toMountGroup 展示原始服务名而非挂载名', () => {
   assert.equal(group.servers[0]?.name, 'memory')
 })
 
-test('buildMountPayload 分全局与工作区两组', () => {
+test('buildMountPayload 分全局、工作区与手动添加三组', () => {
   const data = buildMountPayload(
     [srv({ serverName: 'g', rawName: 'g', file: '/home/me/.dsh/.mcp.json' })],
     [srv()],
+    [srv({ serverName: 'extra_abc', rawName: 'extra', transport: 'streamable-http', file: 'extra.json' })],
   )
   assert.equal(data.global.file, '/home/me/.dsh/.mcp.json')
   assert.equal(data.global.servers[0]?.name, 'g')
   assert.equal(data.workspace.file, '/proj/.mcp.json')
   assert.equal(data.workspace.servers[0]?.name, 'memory')
+  assert.equal(data.manual.file, 'extra.json')
+  assert.equal(data.manual.servers[0]?.name, 'extra')
 })
 
-test('buildMountPayload 两组皆空时返回空组', () => {
-  assert.deepEqual(buildMountPayload([], []), {
+test('buildMountPayload 三组皆空时返回空组', () => {
+  assert.deepEqual(buildMountPayload([], [], []), {
     global: { servers: [] },
     workspace: { servers: [] },
+    manual: { servers: [] },
   })
 })

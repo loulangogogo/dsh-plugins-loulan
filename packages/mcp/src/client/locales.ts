@@ -20,11 +20,17 @@ export const NS = 'dsh-loulan-mcp'
 export const zh = {
   'view.mcp': 'MCP',
   'empty': '本会话未加载 MCP 服务',
+  'toolbar.refresh': '刷新',
+  'toolbar.add': '添加',
+  'toolbar.busy': '处理中…',
   'group.workspace': '本工作区',
+  'group.manual': '手动添加',
   'group.global': '全局共享',
   'source': '来源',
   'tools.unavailable': '工具列表暂不可用',
   'tools.separator': '、',
+  'error.refreshFailed': '刷新失败',
+  'error.addFailed': '添加失败',
 } as const
 
 /** 词典键。 */
@@ -34,9 +40,15 @@ export type McpKey = keyof typeof zh
 export const en: Record<McpKey, string> = {
   'view.mcp': 'MCP',
   'empty': 'No MCP servers loaded in this session',
+  'toolbar.refresh': 'Refresh',
+  'toolbar.add': 'Add',
+  'toolbar.busy': 'Working…',
   'group.workspace': 'This workspace',
+  'group.manual': 'Manually added',
   'group.global': 'Shared globally',
   'source': 'Source',
   'tools.unavailable': 'Tool list unavailable',
   'tools.separator': ', ',
+  'error.refreshFailed': 'Refresh failed',
+  'error.addFailed': 'Add failed',
 }
