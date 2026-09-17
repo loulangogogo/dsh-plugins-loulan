@@ -8,9 +8,10 @@ const raw = {
   workspace: { file: '/proj/.mcp.json', servers: [{ name: 'memory', transport: 'stdio', tools: ['a'] }] },
 }
 
-test('toolsText 有工具用顿号，无工具返回 null', () => {
-  assert.equal(toolsText(['a', 'b']), 'a、b')
-  assert.equal(toolsText([]), null)
+test('toolsText 用给定分隔符连接，无工具返回 null', () => {
+  assert.equal(toolsText(['a', 'b'], '、'), 'a、b')
+  assert.equal(toolsText(['a', 'b'], ', '), 'a, b')
+  assert.equal(toolsText([], '、'), null)
 })
 
 test('normalizeMounts 接受合法载荷', () => {

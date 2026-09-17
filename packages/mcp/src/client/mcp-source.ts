@@ -11,10 +11,11 @@ export type McpSnapshot = McpMountedData | null
  * 把工具名列表格式化为一行文案。
  *
  * @param tools - 工具名数组
- * @returns 顿号连接的文案；无工具时返回 null（由组件本地化）
+ * @param separator - 工具名之间的分隔符（已本地化）
+ * @returns 以 separator 连接的文案；无工具时返回 null（由组件本地化）
  */
-export function toolsText(tools: readonly string[]): string | null {
-  return tools.length > 0 ? tools.join('、') : null
+export function toolsText(tools: readonly string[], separator: string): string | null {
+  return tools.length > 0 ? tools.join(separator) : null
 }
 
 /** 判断是否为普通对象。 */

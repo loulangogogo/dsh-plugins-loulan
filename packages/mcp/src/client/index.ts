@@ -14,6 +14,7 @@ import { MOUNTS_ROUTE_PATH } from '../contract.js'
 import { createMountSource, type McpSnapshot } from './mcp-source.js'
 import { McpView } from './McpView.js'
 import { en, NS, zh } from './locales.js'
+import { ensureMcpStyles } from './styles.js'
 
 /** 依赖：槽位与 locale。 */
 export const inject = ['slots', 'locale']
@@ -38,6 +39,7 @@ async function fetchMounts(sessionId: string): Promise<unknown> {
  * @param ctx - 客户端插件上下文
  */
 export function apply(ctx: Context): void {
+  ensureMcpStyles()
   const t = ctx.locale.bind(NS)
   const sources = new Map<SessionId, ObservableSnapshot<McpSnapshot>>()
   const sourceFor = (sessionId: SessionId): ObservableSnapshot<McpSnapshot> => {

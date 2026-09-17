@@ -24,6 +24,7 @@ export const zh = {
   'group.global': '全局共享',
   'source': '来源',
   'tools.unavailable': '工具列表暂不可用',
+  'tools.separator': '、',
 } as const
 
 /** 词典键。 */
@@ -37,4 +38,5 @@ export const en: Record<McpKey, string> = {
   'group.global': 'Shared globally',
   'source': 'Source',
   'tools.unavailable': 'Tool list unavailable',
+  'tools.separator': ', ',
 }
