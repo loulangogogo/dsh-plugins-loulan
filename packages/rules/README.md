@@ -1,5 +1,7 @@
 # dsh-loulan-rules
 
+[English](README.en.md) | 中文
+
 > **把散落在 `.dsh/rules` 里的规则文件，变成每次对话都随身携带的规则上下文。**
 
 `dsh-loulan-rules` 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的规则注入插件：

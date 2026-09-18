@@ -1,5 +1,7 @@
 # dsh-loulan-mcp
 
+中文 | [English](README.en.md)
+
 > **把项目里的 `.mcp.json` 变成 DSH 会话中开箱即用的 MCP 能力，并给出一页看得见的清单。**
 
 `dsh-loulan-mcp` 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的 MCP 挂载插件：
