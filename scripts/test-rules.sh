@@ -20,7 +20,7 @@ if [[ ! -d "$HARNESS" ]]; then
 fi
 
 # 先构建 rules 插件：patch 通过相对路径 ./lib/index.js 加载，需确保 lib/ 是最新产物。
-(cd "$ROOT" && pnpm --filter dsh-plugin-rules build)
+(cd "$ROOT" && pnpm --filter dsh-loulan-rules build)
 
 # 切到 harness 目录后启动：loader 以该目录解析 patch。
 cd "$HARNESS"
