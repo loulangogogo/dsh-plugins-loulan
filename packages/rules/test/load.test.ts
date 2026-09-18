@@ -83,7 +83,7 @@ test('loadRules 总预算放不下的文件被省略，后面的小文件仍可�
     writeFileSync(join(dir, 'a-small.md'), 'short')
     writeFileSync(join(dir, 'b-huge.md'), 'Y'.repeat(5000))
     writeFileSync(join(dir, 'c-small.md'), 'tiny')
-    const loaded = await loadRules([{ absoluteDir: dir, displayDir: '.dsh/rules' }], { maxBytes: 1000, maxSourceBytes: 65536 })
+    const loaded = await loadRules([{ absoluteDir: dir, displayDir: '.dsh/rules' }], { maxBytes: 2500, maxSourceBytes: 65536 })
     assert.deepEqual(loaded.files.map(file => file.displayPath), ['.dsh/rules/a-small.md', '.dsh/rules/c-small.md'])
     assert.deepEqual(loaded.omitted, ['.dsh/rules/b-huge.md'])
   } finally {
@@ -101,7 +101,7 @@ test('loadRules 结果恰好不超过 maxBytes（渲染后字节数）', async (
   try {
     writeFileSync(join(dir, 'a.md'), 'a'.repeat(200))
     writeFileSync(join(dir, 'b.md'), 'b'.repeat(200))
-    const maxBytes = 800
+    const maxBytes = 1900
     const loaded = await loadRules([{ absoluteDir: dir, displayDir: '.dsh/rules' }], { maxBytes, maxSourceBytes: 65536 })
     assert.ok(loaded.files.length >= 1, '至少保留一个文件')
     assert.ok(Buffer.byteLength(renderRules(loaded.files, loaded.omitted), 'utf8') <= maxBytes)

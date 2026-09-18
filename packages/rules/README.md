@@ -1,4 +1,4 @@
-# dsh-plugin-rules
+# dsh-loulan-rules
 
 在会话第一次进入的 `agent/pre-step`，读取全局与项目规则目录下的所有规则文件，
 组合成一条 user 角色的 `<system-reminder>` 注入对话。规则随历史持久保留，后续
@@ -60,7 +60,7 @@ Rules from: .dsh/rules/team.md
 
 ```sh
 pnpm build          # 产出 lib/
-pnpm pack           # prepack 会自动 build，生成 dsh-plugin-rules-<version>.tgz
+pnpm pack           # prepack 会自动 build，生成 dsh-loulan-rules-<version>.tgz
 ```
 
 `package.json` 的 `dsh.bundle.patch` 指向 `./cordis.patch.yml`，因此可以作为

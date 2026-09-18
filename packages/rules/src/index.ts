@@ -7,7 +7,7 @@
  * 规则随历史持久保留，因此后续每次请求都会携带；恢复会话时若历史中已有本
  * 插件的规则消息则不再重复注入。
  *
- * @module dsh-plugin-rules
+ * @module dsh-loulan-rules
  */
 
 import { join } from 'node:path'

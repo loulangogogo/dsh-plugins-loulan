@@ -2,7 +2,7 @@
 # -e：任一命令失败立即退出；-u：引用未定义变量报错；-o pipefail：管道任一环失败即失败。
 set -euo pipefail
 
-# 用 tsx 运行 dsh-plugin-rules 的单元测试。
+# 用 tsx 运行 dsh-loulan-rules 的单元测试。
 # Node 原生类型擦除不会把 .js 后缀映射到 .ts，因此 node --test 无法解析源码里
 # NodeNext 风格的 .js 相对导入；tsx 会正确地把 .js 解析到对应的 .ts。
 # 这里复用 harness 自带的 tsx，不额外引入项目 devDependency。
