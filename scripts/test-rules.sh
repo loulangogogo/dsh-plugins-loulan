@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# -e：任一命令失败立即退出；-u：引用未定义变量报错；-o pipefail：管道任一环失败即失败。
+set -euo pipefail
+
+# 只加载 rules 插件，以独立 Web UI 验证规则注入效果。
+# 通过 DSH_HARNESS 指定 harness checkout 位置（默认 ~/.dsh/deepseek-harness）。
+
+# 项目根目录：脚本所在目录（scripts/）的上一级。
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 引用根目录统一环境配置：读取 DSH_HARNESS（缺省 ~/.dsh/deepseek-harness）。
+source "$ROOT/scripts/dsh.env"
+# harness checkout 目录，来自统一配置。
+HARNESS="$DSH_HARNESS"
+
+# 前置校验：harness 目录必须存在，否则给出提示并退出。
+if [[ ! -d "$HARNESS" ]]; then
+  echo "未找到 DeepSeek Harness：$HARNESS" >&2
+  echo "请设置 DSH_HARNESS=/path/to/deepseek-harness 后重试。" >&2
+  exit 1
+fi
+
+# 先构建 rules 插件：patch 通过相对路径 ./lib/index.js 加载，需确保 lib/ 是最新产物。
+(cd "$ROOT" && pnpm --filter dsh-plugin-rules build)
+
+# 切到 harness 目录后启动：loader 以该目录解析 patch。
+cd "$HARNESS"
+# exec 用 dsh 进程替换当前 shell；--patch 只注入 rules 插件自带的 cordis.patch.yml，
+# --port 13081 固定端口（避开默认 3080 与 test-mcp 的 13080），其余参数 "$@" 透传。
+exec pnpm dsh web --patch "$ROOT/packages/rules/cordis.patch.yml" "$@" --port 13081

@@ -1,11 +1,12 @@
 # dsh-plugins-loulan
 
-一个 **DeepSeek Harness（DSH）多插件开发项目**（pnpm monorepo）。目前包含两个插件：
+一个 **DeepSeek Harness（DSH）多插件开发项目**（pnpm monorepo）。目前包含三个插件：
 
 | 插件 | 目录 | 作用 |
 |---|---|---|
 | `dsh-loulan-mcp` | [packages/mcp](packages/mcp) | 自动读取项目下的 `.mcp.json`，把其中的 MCP server 挂载进 DSH |
 | `hello` | [packages/hello](packages/hello) | 注册斜杠命令 `/hello`，在聊天界面输出「你好」 |
+| `rules` | [packages/rules](packages/rules) | 读取全局 `~/.dsh/rules` 与项目 `.dsh/rules` 下的规则文件并注入会话 |
 
 ---
 
@@ -13,7 +14,7 @@
 
 ```text
 dsh-plugins-loulan/
-├── cordis.yml              # patch overlay：把两个插件插入到 DSH 组合中
+├── cordis.yml              # patch overlay：把三个插件插入到 DSH 组合中
 ├── package.json            # workspace 根
 ├── pnpm-workspace.yaml
 ├── tsconfig.json
@@ -23,7 +24,8 @@ dsh-plugins-loulan/
 │   └── dev.sh              # 一键以本 overlay 启动 DSH Web UI
 └── packages/
     ├── mcp/                # 插件 1
-    └── hello/              # 插件 2
+    ├── hello/              # 插件 2
+    └── rules/              # 插件 3
 ```
 
 ## 插件是什么
@@ -127,6 +129,30 @@ cd ~/.dsh/deepseek-harness && pnpm dsh web --patch "$PWD/cordis.yml"
 - id: hello
   name: /绝对/路径/packages/hello/src/index.ts
 ```
+
+## 插件 3：rules
+
+在会话第一次进入的 `agent/pre-step`，读取规则目录下的所有规则文件并注入对话：
+
+- **全局**：`$DSH_HOME/rules`（缺省 `~/.dsh/rules`）。
+- **项目**：会话工作目录下的 `<cwd>/.dsh/rules`。
+
+递归读取普通文件（跳过符号链接），全局在前、项目在后，组合成一条 user 角色的
+`<system-reminder>` 折入请求批次（紧随用户直接输入之后）。规则随历史持久保留，
+恢复会话时不会重复注入。单文件默认上限 256 KiB、总预算 64 KiB，超出的文件会被
+省略并在消息中注明。
+
+```yaml
+- id: rules
+  name: /绝对/路径/packages/rules/src/index.ts
+  config:
+    dshHome: /path/to/.dsh   # 缺省 $DSH_HOME 或 ~/.dsh
+    maxBytes: 65536          # 整条规则消息字节上限；<=0 禁用注入
+    maxSourceBytes: 262144   # 单个规则文件字节上限
+```
+
+同时提供打包分发用的 [packages/rules/cordis.patch.yml](packages/rules/cordis.patch.yml)，
+详细说明见 [packages/rules/README.md](packages/rules/README.md)。
 
 ## 注意
 
