@@ -37,7 +37,7 @@ function fakeRuntime(
     order: [] as string[],
   }
   const runtime: MountsRuntime = {
-    seedGlobal: () => {},
+    loadGlobal: async () => {},
     globalGroup: () => globalGroup,
     track: () => {},
     forget: () => {},

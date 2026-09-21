@@ -20,18 +20,27 @@ interface FakeFiber {
  * 构造 ctx 桩。
  *
  * ctx.plugin 返回假 fiber（非 thenable 时 allSettled 视作已启动；fail 集合内的名字返回
- * rejected thenable 以模拟启动失败），ctx.tools.schemas 返回空工具表，ctx.agents.list 由用例控制。
+ * rejected thenable 以模拟启动失败；hold 集合内的名字返回挂起的 thenable，直到用例调用
+ * 返回的 released 中的放行函数才 settle，用以模拟启动期握手仍未完成），
+ * ctx.tools.schemas 返回空工具表，ctx.agents.list 由用例控制。
  *
  * ctx 桩**始终**模拟 cordis 的 ReflectService 守卫：本插件未在 inject 中声明 `agents`，
  * 因此任何对 `ctx.agents` 的访问都会抛错——空闲保护必须走注入的 `listAgents`。
  *
- * @param options - events 记录挂载/释放顺序；fail 模拟启动失败；failDispose 模拟释放抛错
- * @returns ctx 桩与假 fiber 记录
+ * @param options - events 记录挂载/释放顺序；fail 模拟启动失败；failDispose 模拟释放抛错；
+ *   hold 模拟启动未完成（fiber 挂起）
+ * @returns ctx 桩、假 fiber 记录与 hold 的放行函数
  */
 function fakeCtx(
-  options: { events?: string[]; fail?: ReadonlySet<string>; failDispose?: ReadonlySet<string> } = {},
+  options: {
+    events?: string[]
+    fail?: ReadonlySet<string>
+    failDispose?: ReadonlySet<string>
+    hold?: ReadonlySet<string>
+  } = {},
 ) {
   const fibers: FakeFiber[] = []
+  const released: Array<() => void> = []
   const ctx = {
     tools: { schemas: () => [] },
     plugin: (_plugin: unknown, config: FakeFiber['config']) => {
@@ -53,6 +62,12 @@ function fakeCtx(
           then: (_resolve: unknown, reject: (reason: unknown) => void) => reject(new Error('启动失败')),
         }
       }
+      if (options.hold?.has(name)) {
+        return {
+          ...handle,
+          then: (resolve: (value: unknown) => void) => { released.push(() => resolve(undefined)) },
+        }
+      }
       return handle
     },
   }
@@ -60,7 +75,7 @@ function fakeCtx(
   Object.defineProperty(ctx, 'agents', {
     get() { throw new Error('cannot get property "agents" without inject') },
   })
-  return { ctx: ctx as unknown as Context, fibers }
+  return { ctx: ctx as unknown as Context, fibers, released }
 }
 
 /**
@@ -117,16 +132,23 @@ test('planGlobalRefresh 新配置为空时全部卸载', () => {
   })
 })
 
-test('runtime 未跟踪会话只返回全局分组', () => {
-  const { ctx } = fakeCtx()
-  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
-  runtime.seedGlobal([handle({ serverName: 'g', rawName: 'g', file: '/home/me/.dsh/.mcp.json' })])
+test('runtime 未跟踪会话只返回全局分组', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { g: { command: 'x' } } }))
+    const { ctx } = fakeCtx()
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+    await runtime.loadGlobal()
 
-  const data = runtime.read(null)
-  assert.equal(data.global.servers[0]?.name, 'g')
-  assert.deepEqual(data.workspace.servers, [])
-  assert.deepEqual(data.manual.servers, [])
-  assert.equal(runtime.globalGroup().servers[0]?.name, 'g')
+    const data = runtime.read(null)
+    assert.equal(data.global.servers[0]?.name, 'g')
+    assert.deepEqual(data.workspace.servers, [])
+    assert.deepEqual(data.manual.servers, [])
+    assert.equal(runtime.globalGroup().servers[0]?.name, 'g')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('runtime track 后 read 给出该会话三组载荷，forget 后清空', () => {
@@ -349,28 +371,59 @@ test('syncGlobal 忙时不动 fiber（含文件缺失时不卸载）', async () 
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
   try {
     const file = join(dir, '.mcp.json')
-    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    writeFileSync(file, JSON.stringify({ mcpServers: { g: { command: 'x' } } }))
     const agents: Array<{ status: string }> = []
     const { ctx, fibers } = fakeCtx()
-    let disposed = false
-    let path: string | undefined = undefined
+    let path: string | undefined = file
     const runtime = createMountsRuntime({
       ctx,
       resolveGlobalFile: () => path,
       listAgents: () => agents,
     })
-    runtime.seedGlobal([handle({ serverName: 'g', rawName: 'g' }, { dispose: () => { disposed = true } })])
+    // 先挂上既有全局服务 g，作为「忙时不得被卸载」的对象。
+    await runtime.loadGlobal()
+    assert.equal(fibers.length, 1)
 
     agents.push({ status: 'running' })
-    // 文件已出现且有新内容：忙时不得挂载。
-    path = file
+    // 配置已变更：忙时不得重挂。
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
     await runtime.syncGlobal()
-    assert.equal(fibers.length, 0)
+    assert.equal(fibers.length, 1)
     // 文件缺失：忙时也不得卸载既有全局挂载。
     path = undefined
     await runtime.syncGlobal()
-    assert.equal(disposed, false)
+    assert.equal(fibers[0]?.disposed, false)
     assert.equal(runtime.read(null).global.servers[0]?.name, 'g')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadGlobal 在途时并发 syncGlobal 复用同一次，不重复挂载同名服务', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const events: string[] = []
+    // hold：让 a 的 fiber 一直挂起，模拟启动期 stdio 握手尚未完成。
+    const { ctx, fibers, released } = fakeCtx({ events, hold: new Set(['a']) })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
+
+    const startup = runtime.loadGlobal()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    assert.deepEqual(events, ['mount:a'])
+
+    // 此刻到达的 GET 拉取必须等这一次同步，而不是再挂一遍同名 serverName——同名实例会因
+    // 命名空间被占用而启动失败，句柄随即被展示层过滤掉，全局分组会一直显示为空。
+    const pull = runtime.syncGlobal()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    assert.deepEqual(events, ['mount:a'])
+    assert.equal(fibers.length, 1)
+
+    // 放行握手：启动期挂载完成，载荷给出全局服务。
+    for (const release of released) release()
+    await Promise.all([startup, pull])
+    assert.equal(runtime.read(null).global.servers[0]?.name, 'a')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

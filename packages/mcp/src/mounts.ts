@@ -73,11 +73,15 @@ export type ActionResult =
 /** 「MCP」标签页运行时：会话状态 + 刷新/添加控制面。 */
 export interface MountsRuntime {
   /**
-   * 记录启动时已挂载的全局共享服务句柄。
+   * 启动期挂载全局 .mcp.json。
    *
-   * @param handles - mountFile 返回的全局句柄（已完成启动并含工具名）
+   * 与 syncGlobal 复用同一去重槽：启动期在途的挂载会被读路径等待，而不是让 GET
+   * 再挂一遍同一批 serverName（同名实例会因命名空间被占用而启动失败）。
+   * 不看忙闲——启动时即使已有会话在运行，也必须挂上全局服务。
+   *
+   * @returns 挂载完成的 Promise
    */
-  seedGlobal(handles: MountedHandle[]): void
+  loadGlobal(): Promise<void>
   /**
    * 读取当前全局共享分组。
    *
@@ -108,8 +112,9 @@ export interface MountsRuntime {
   /**
    * 同步全局 .mcp.json 的磁盘现状：内容变更增量重挂，文件消失则卸载全部全局服务。
    *
-   * 拉取清单（GET）与刷新都会调用；有会话正在运行时**静默跳过**，避免读路径打断
-   * 运行中的会话；并发调用复用同一次同步，避免重复挂载/释放同一批 fiber。
+   * 拉取清单（GET）与刷新都会调用；已有同步在途（含启动期挂载）时等待同一次同步，
+   * 忙时**静默跳过**，避免读路径打断运行中的会话；并发调用复用同一次同步，
+   * 避免重复挂载/释放同一批 fiber。
    *
    * @returns 同步完成的 Promise；失败时 reject，由调用方决定是否影响本次响应
    */
@@ -197,7 +202,7 @@ export function createMountsRuntime(options: {
   const sessions = new Map<string, SessionRecord>()
   /** 当前全局挂载：服务名 → 句柄。 */
   const globalHandles = new Map<string, MountedHandle>()
-  /** 进行中的全局同步：并发调用复用同一 Promise，避免重复动同一批 fiber。 */
+  /** 进行中的全局同步（含启动期挂载）：并发调用复用同一 Promise，避免重复动同一批 fiber。 */
   let globalSync: Promise<void> | null = null
 
   /** 取当前全局服务明细。 */
@@ -346,22 +351,33 @@ export function createMountsRuntime(options: {
   }
 
   /**
-   * 同步全局配置：忙时静默跳过，并发调用复用同一次同步。
+   * 同步全局配置：等在途同步结束、忙时静默跳过、并发调用复用同一次同步。
    *
    * @returns 同步完成的 Promise；失败时 reject，由调用方决定是否影响本次响应
    */
   const syncGlobal = (): Promise<void> => {
+    // 已有同步在途（启动期挂载，或页面重载 / 多标签页 / React 双订阅的并发）：直接等它，
+    // 绝不并发再挂一遍同一批 serverName——同名实例会因命名空间被占用而启动失败。
+    if (globalSync !== null) return globalSync
     // 忙时静默跳过：拉取清单是读路径，不得打断运行中的会话。
     if (isBusy()) return Promise.resolve()
-    // 并发（页面重载、多标签页、React 双订阅）复用同一次同步；结束后归零以便下次重新判断。
+    // 结束后归零，以便下次重新判断。
+    globalSync = refreshGlobal().finally(() => { globalSync = null })
+    return globalSync
+  }
+
+  /**
+   * 启动期挂载全局配置：不看忙闲，与 syncGlobal 复用同一去重槽。
+   *
+   * @returns 挂载完成的 Promise
+   */
+  const loadGlobal = (): Promise<void> => {
     globalSync ??= refreshGlobal().finally(() => { globalSync = null })
     return globalSync
   }
 
   return {
-    seedGlobal: (handles) => {
-      for (const handle of handles) globalHandles.set(handle.mounted.serverName, handle)
-    },
+    loadGlobal,
     globalGroup: () => toMountGroup(globalServers()),
     track: (agent, workspaceFile, handles) => {
       sessions.set(agent.id, { agent, workspaceFile, workspaceHandles: handles, uploads: [], uploadHandles: [] })

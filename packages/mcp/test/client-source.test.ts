@@ -120,6 +120,26 @@ test('数据源工作区与手动皆空但全局非空时可重拉', async () =>
   assert.deepEqual(control.source.getSnapshot(), raw)
 })
 
+test('数据源三组全空时仍可重拉（会话刚打开、MCP 服务尚未挂载完）', async () => {
+  // 启动期全局尚未挂载、会话也尚未登记，载荷会是三组全空；若当成终态锁死，
+  // 服务加载完成后页面仍不显示，且切走标签页再切回也不会自愈。
+  const empty = { global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] } }
+  let calls = 0
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      return calls === 1 ? empty : raw
+    },
+  }).io)
+  control.source.subscribe(() => {})
+  await tick()
+  assert.deepEqual(control.source.getSnapshot(), empty)
+  control.source.subscribe(() => {})
+  await tick()
+  assert.equal(calls, 2)
+  assert.deepEqual(control.source.getSnapshot(), raw)
+})
+
 test('refresh 成功用响应更新快照并通知订阅者', async () => {
   const updated = { ...raw, manual: { file: 'extra.json', servers: [{ name: 'extra2', transport: 'stdio', tools: [] }] } }
   let payload: unknown = raw

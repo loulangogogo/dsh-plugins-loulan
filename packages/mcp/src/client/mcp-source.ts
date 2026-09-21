@@ -141,24 +141,23 @@ function createSnapshotStore(): SnapshotStore {
 }
 
 /**
- * 判断载荷是否可能仍是「工作区挂载尚未写入运行时」的中间态。
+ * 判断载荷是否可能仍是「挂载尚未写入运行时」的中间态。
  *
- * 工作区与手动分组都为空、却有全局服务时，允许后续订阅再拉一次。
+ * 工作区与手动两组都为空时一律视为中间态，下次订阅重新拉取：启动期全局尚未挂载完
+ * 会是三组全空，若当成终态，页面会永久停在空态（切走标签页再切回也不会自愈）。
  *
  * @param data - 已归一化的载荷
  * @returns true 表示下次订阅应重新拉取
  */
 function isIncomplete(data: McpMountedData): boolean {
-  return data.workspace.servers.length === 0
-    && data.manual.servers.length === 0
-    && data.global.servers.length > 0
+  return data.workspace.servers.length === 0 && data.manual.servers.length === 0
 }
 
 /**
  * 创建一个按需拉取的快照源。
  *
  * 初次订阅时拉取一次并发布：拉取失败或呈中间态都不锁死，后续订阅
- * （如标签页切回）会再次拉取，避免会话永久停在缺工作区分组的空态。
+ * （如标签页切回）会再次拉取，避免会话永久停在空态。
  *
  * @param sessionId - 会话 id
  * @param fetchMounts - 拉取函数

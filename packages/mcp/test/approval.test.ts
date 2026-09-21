@@ -47,7 +47,7 @@ const handle = (over: Partial<MountedServer> = {}): MountedHandle => ({
 function fakeRuntime(over: Partial<MountsRuntime> = {}): MountsRuntime {
   const empty: ActionResult = { ok: false, code: 400, message: '桩' }
   return {
-    seedGlobal: () => {},
+    loadGlobal: async () => {},
     globalGroup: () => ({ servers: [] }),
     track: () => {},
     forget: () => {},

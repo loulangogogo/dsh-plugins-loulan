@@ -13,7 +13,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { name, Config } from './config.js'
 import { findMcpJson, dshHome } from './discover.js'
-import { mountFile } from './mount.js'
 import { ROUTE_PREFIX } from './contract.js'
 import { createMountsRuntime } from './mounts.js'
 import { createMountsHandler } from './http.js'
@@ -65,9 +64,10 @@ export async function apply(ctx: Context, config: Config) {
     )
   })
 
-  // 3. 最后才挂全局 .dsh 根 .mcp.json：载荷读取时现算，全局晚挂上不影响已登记的会话。
-  const handles = rootFile ? await mountFile(ctx, rootFile) : []
-  runtime.seedGlobal(handles)
+  // 3. 最后才挂全局 .dsh 根 .mcp.json：交给运行时挂载，使启动期间的 GET 拉取
+  //    复用在途的这一次同步，而不是对同一批 serverName 再挂一遍（同名实例会启动失败）。
+  //    载荷读取时现算，全局晚挂上不影响已登记的会话。
+  await runtime.loadGlobal()
 
   // 【已停用】首个对话回合的审批询问（工作区 .mcp.json 现为自动挂载，不再询问）。
   // 如需恢复「询问后挂载」模式：取消下行注释，并在上方 import 中补回 registerAgentRequest，
