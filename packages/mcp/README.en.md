@@ -94,7 +94,7 @@ pnpm dev
 
 > `pnpm install` rebuilds `node_modules` and wipes the manual symlinks, so **you need to re-run `pnpm link:dsh` afterwards**.
 
-The repo-root `cordis.yml` already wires `packages/mcp` (this plugin) and `packages/hello` (the example plugin) into the overlay, and `pnpm dev` picks it up automatically.
+The repo-root `cordis.yml` already wires `packages/hello` (the example plugin), `packages/mcp` (this plugin), and `packages/rules` into the overlay, and `pnpm dev` picks it up automatically.
 
 ### 3.3 Confirm it took effect
 
@@ -307,7 +307,6 @@ packages/mcp/
 │   ├── http.ts           # HTTP endpoints
 │   └── client/           # Browser side: tab, data source, styles, dictionary
 ├── test/                 # node:test + tsx
-├── example/mcp.html      # Style testbed (design draft, not shipped)
 └── scripts/              # Client bundling and test scripts
 ```
 
@@ -325,11 +324,10 @@ pnpm --filter dsh-loulan-mcp build    # Host tsc + client type check + esbuild c
 - Release: `pnpm release` (`pnpm login` + `build` + `publish`).
 - ⚠️ **After deleting a `src/` module, clean `lib/` first**: `tsc` does not remove stale artifacts from the output directory, and leftover modules get published along with everything else. `rm -rf lib` before building is the most reliable habit.
 
-### Styles and design draft
+### Styles
 
 - Styles are inlined as template strings in `src/client/styles.ts`, injected once by `ensureMcpStyles()` as `<style data-plugin="dsh-loulan-mcp">` (equivalent to the harness's style-injection mechanism, just without pulling in the CSS Modules pipeline).
 - Class names all carry the `dsh-mcp-` prefix; colors always go through semantic tokens (`--dsw-alias-*`, `--dsw-specific-tip`), so they follow light/dark themes automatically.
-- `example/mcp.html` is an **interactive design draft**: it shares the same class names as the implementation and can switch the toolbar scheme, server-row scheme, theme, state, and container width. When revising the layout, settle it here first, then write it back into `styles.ts` / `McpView.tsx`.
 
 ## 10. Design records
 

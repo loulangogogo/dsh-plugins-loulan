@@ -16,7 +16,7 @@ Or install it from a local tarball:
 
 ```sh
 pnpm pack
-dsh plugin --profile <profile> add ./dsh-plugin-hello-0.1.0.tgz
+dsh plugin --profile <profile> add ./dsh-plugin-hello-0.2.0.tgz
 ```
 
 After restarting the corresponding profile, typing `/hello` in the chat box returns `你好`.

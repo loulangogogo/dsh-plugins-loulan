@@ -14,7 +14,7 @@ dsh plugin --profile <profile> add dsh-plugin-hello
 
 ```sh
 pnpm pack
-dsh plugin --profile <profile> add ./dsh-plugin-hello-0.1.0.tgz
+dsh plugin --profile <profile> add ./dsh-plugin-hello-0.2.0.tgz
 ```
 
 重新启动对应 profile 后，在聊天框输入 `/hello` 即返回「你好」。

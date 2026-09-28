@@ -12,7 +12,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 
 /** 插件名，须与 cordis.yml 中的 id 对应。 */
-export const name = 'hello'
+export const name = 'dsh-plugin-hello'
 /** 声明依赖 commands 服务，保证 apply 执行时 ctx.commands 已初始化可用。 */
 export const inject = ['commands']
 

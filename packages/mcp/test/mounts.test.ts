@@ -507,7 +507,11 @@ test('unload 拒绝全局共享与未知目标，且不释放任何 fiber', asyn
       code: 400,
       message: '全局共享服务不可卸载',
     })
-    assert.equal((await runtime.unload('s1', 'nope')).code, 400)
+    assert.deepEqual(await runtime.unload('s1', 'nope'), {
+      ok: false,
+      code: 400,
+      message: '未知的卸载目标',
+    })
     assert.equal(fibers[0]?.disposed, false)
     assert.equal(runtime.read('s1').workspace.servers.length, 1)
   } finally {

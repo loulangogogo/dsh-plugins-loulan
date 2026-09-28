@@ -6,7 +6,7 @@
 # 才需要同步修改下面三条 name。
 
 - insert:
-    - id: dsh-loulan-hello
+    - id: dsh-plugin-hello
       name: ./packages/hello/src/index.ts
 
     - id: dsh-loulan-mcp

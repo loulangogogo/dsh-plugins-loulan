@@ -20,13 +20,32 @@ import { renderRules } from './render.js'
 
 export type { RulesConfig } from './config.js'
 
-/** 插件名，须与 cordis.yml 中的 id 对应。 */
-export const name = 'rules'
+/** 插件名；同时是本插件注入消息的 `source.kind`（见 {@link RulesMessageSource}）。 */
+export const name = 'dsh-loulan-rules'
+
+/**
+ * 本插件注入消息的来源标记。
+ *
+ * `dsh-llm` 0.1.7 起取消了通用的 `{ kind: 'plugin', plugin }` 来源，改为
+ * 「每个生产者声明自己的 kind」（见 `MessageSourceMap` 的 merge-extensible 注释）。
+ * 这里取与 npm 包名一致的 `dsh-loulan-rules`：消息来源 kind 与第一方插件共用
+ * 一个全局命名空间，用全名可避免与通用的 `rules` 撞名。
+ * 下面 map 的键必须与 {@link name} 保持一致。
+ */
+export interface RulesMessageSource {
+  kind: 'dsh-loulan-rules'
+  form: 'instructions'
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-loulan-rules': RulesMessageSource
+  }
+}
 
 /** 一条消息是否来自本插件。 */
 function isRulesMessage(message: Message): boolean {
-  const source = message.source
-  return source.kind === 'plugin' && source.plugin === name
+  return message.source.kind === name
 }
 
 /** 可见历史或本轮已领取消息里是否已有本插件的规则上下文。 */
@@ -71,7 +90,7 @@ export function apply(ctx: Context, config: RulesConfig = {}): void {
 
     const context = createUserMessage({
       content: [{ type: 'text', text }],
-      source: { kind: 'plugin', plugin: name, form: 'instructions' },
+      source: { kind: name, form: 'instructions' },
     })
     // 折在已领取批次之后：用户直接输入在前，驱动追加的运行时上下文在后。
     let insertAt = decision.messages.length

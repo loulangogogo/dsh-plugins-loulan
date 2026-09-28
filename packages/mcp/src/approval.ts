@@ -138,7 +138,8 @@ export function registerAgentCreated(
 ): void {
   ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
-    if (cwd === undefined) return
+    // agent/created 是 serial 事件，监听器类型为 `undefined | Promise<undefined>`，故显式返回 undefined。
+    if (cwd === undefined) return undefined
     const file = findMcpJson(cwd)
     const workFile = file === undefined || file === rootFile ? undefined : file
     if (workFile !== undefined) {

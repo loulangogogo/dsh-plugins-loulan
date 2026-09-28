@@ -32,7 +32,7 @@ This file provides guidance to the AI agent when working with code in this repos
 
 - **删除 `src/` 模块后先 `rm -rf lib` 再 build**：`tsc` 不清理输出目录，残留产物会被一起发布。
 - 声明了 `dsh.client` 就必须同时有 `lib/client.js`：只声明不构建会让 Web 启动时报聚合错误。改完客户端代码需重建并刷新页面。
-- 根 `cordis.yml` 的 `name` 用**绝对路径**（loader 按 profile 目录解析）；包内 `cordis.patch.yml` 用**相对路径**（按 patch 文件自身解析）。项目移动后需同步根文件中的绝对路径。
+- 根 `cordis.yml` 与包内 `cordis.patch.yml` 的 `name` 都用**相对路径**（loader 按 patch 文件自身所在目录解析），整个项目可整体移动；只有把插件目录挪到相对 patch 文件的新位置时才需要同步修改。
 - 新增客户端外部依赖时，要加进 `scripts/build-client.mjs` 的 `PLATFORM_MODULES`，否则会被打进 bundle。
 - `@deepseek-ai/dsh-mcp-client` 版本必须与 DSH 运行时一致；版本错配会出现两份 mcp-client，导致工具注册冲突。
 - `lib/` 不入库（`.gitignore` 已忽略），由构建生成。

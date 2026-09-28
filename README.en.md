@@ -29,8 +29,8 @@ dsh-plugins-loulan/
 │   ├── dsh.env             # shared environment config: DSH_HARNESS (default ~/.dsh/deepseek-harness)
 │   ├── link-dsh.sh         # symlinks the harness's @deepseek-ai/* packages
 │   ├── dev.sh              # starts the DSH Web UI with this overlay (port 13080)
-│   ├── test-mcp.sh         # starts the Web UI with only the mcp plugin loaded (port 13080, builds first)
-│   └── test-rules.sh       # starts the Web UI with only the rules plugin loaded (port 13081, builds first)
+│   ├── test-mcp.sh         # starts the Web UI with only the mcp plugin loaded (port 13081, builds first)
+│   └── test-rules.sh       # starts the Web UI with only the rules plugin loaded (port 13082, builds first)
 └── packages/
     ├── mcp/                # plugin 1: dsh-loulan-mcp
     ├── hello/              # plugin 2: dsh-plugin-hello
@@ -70,14 +70,14 @@ DSH_HARNESS=~/.dsh/deepseek-harness pnpm link:dsh
 | Command | Purpose |
 |---|---|
 | `pnpm dev` | Starts the Web UI with the root `cordis.yml`; all three plugins use their source entries, port **13080** |
-| `pnpm test-mcp` | Builds `dsh-loulan-mcp` first, then starts the Web UI with only `packages/mcp/cordis.patch.yml` (port 13080) |
-| `pnpm test-rules` | Builds `dsh-loulan-rules` first, then starts the Web UI with only `packages/rules/cordis.patch.yml` (port 13081) |
+| `pnpm test-mcp` | Builds `dsh-loulan-mcp` first, then starts the Web UI with only `packages/mcp/cordis.patch.yml` (port 13081) |
+| `pnpm test-rules` | Builds `dsh-loulan-rules` first, then starts the Web UI with only `packages/rules/cordis.patch.yml` (port 13082) |
 | `pnpm typecheck` | Whole-repo type check using the root `tsconfig.json` (excluding each package's browser half) |
 
 > ⚠️ `test-mcp` / `test-rules` sound like unit tests, but they **actually mean "build first, then start the Web UI"**;
 > the real unit tests live inside each package — use `pnpm --filter <package-name> test`.
 
-After starting, open <http://127.0.0.1:13080> (for `pnpm test-rules` it is 13081). `pnpm dev` is equivalent to:
+After starting, open <http://127.0.0.1:13080> (`pnpm test-mcp` uses 13081 and `pnpm test-rules` uses 13082). `pnpm dev` is equivalent to:
 
 ```sh
 cd ~/.dsh/deepseek-harness
@@ -180,7 +180,7 @@ renders `你好` directly; the model is not involved and conversation behavior d
 - `inject: ['commands']` declares the dependency on the command registry service.
 
 ```yaml
-- id: hello
+- id: dsh-plugin-hello
   name: /absolute/path/packages/hello/src/index.ts
 ```
 
@@ -218,7 +218,7 @@ shadowed by compaction they are automatically restored at the next pre-step. The
 256 KiB and the total budget is 64 KiB; files that exceed the limit are omitted entirely and noted in the message.
 
 ```yaml
-- id: rules
+- id: dsh-loulan-rules
   name: /absolute/path/packages/rules/src/index.ts
   config:
     dshHome: /path/to/.dsh   # defaults to $DSH_HOME or ~/.dsh

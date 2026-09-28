@@ -25,5 +25,5 @@ fi
 # 切到 harness 目录后启动：loader 以该目录解析 patch。
 cd "$HARNESS"
 # exec 用 dsh 进程替换当前 shell；--patch 只注入 rules 插件自带的 cordis.patch.yml，
-# --port 13081 固定端口（避开默认 3080 与 test-mcp 的 13080），其余参数 "$@" 透传。
-exec pnpm dsh web --patch "$ROOT/packages/rules/cordis.patch.yml" "$@" --port 13081
+# --port 13082 固定端口（避开默认 3080 与 dev.sh 的 13080、test-mcp 的 13081），其余参数 "$@" 透传。
+exec pnpm dsh web --patch "$ROOT/packages/rules/cordis.patch.yml" "$@" --port 13082

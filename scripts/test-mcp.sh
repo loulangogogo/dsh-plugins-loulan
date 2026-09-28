@@ -2,7 +2,7 @@
 # -e：任一命令失败立即退出；-u：引用未定义变量报错；-o pipefail：管道任一环失败即失败。
 set -euo pipefail
 
-# 用本项目的 cordis.yml 作为 patch overlay 启动 DSH Web UI。
+# 只加载 mcp 插件，以独立 Web UI 验证 MCP 挂载效果。
 # 通过 DSH_HARNESS 指定 harness checkout 位置（默认 ~/.dsh/deepseek-harness）。
 
 # 项目根目录：脚本所在目录（scripts/）的上一级。
@@ -24,6 +24,6 @@ fi
 
 # 切到 harness 目录后启动：loader 以该目录解析 cordis.yml 中的路径。
 cd "$HARNESS"
-# exec 用 dsh 进程替换当前 shell；--patch 注入本项目 cordis.yml 与 mcp 插件自带的
-# cordis.patch.yml（B2），--port 13080 固定端口（避开默认 3080），其余参数 "$@" 透传。
-exec pnpm dsh web --patch "$ROOT/packages/mcp/cordis.patch.yml" "$@" --port 13080
+# exec 用 dsh 进程替换当前 shell；--patch 只注入 mcp 插件自带的
+# cordis.patch.yml，--port 13081 固定端口（避开默认 3080 与 dev.sh 的 13080），其余参数 "$@" 透传。
+exec pnpm dsh web --patch "$ROOT/packages/mcp/cordis.patch.yml" "$@" --port 13081

@@ -93,7 +93,7 @@ pnpm dev
 
 > `pnpm install` 会重建 `node_modules` 并清掉手工软链，**之后需要重跑一次 `pnpm link:dsh`**。
 
-仓库根的 `cordis.yml` 已经把 `packages/mcp`（本插件）与 `packages/hello`（示例插件）接进 overlay，`pnpm dev` 会自动带上它。
+仓库根的 `cordis.yml` 已经把 `packages/hello`（示例插件）、`packages/mcp`（本插件）与 `packages/rules` 接进 overlay，`pnpm dev` 会自动带上它。
 
 ### 3.3 确认是否生效
 
@@ -306,7 +306,6 @@ packages/mcp/
 │   ├── http.ts           # HTTP 端点
 │   └── client/           # 浏览器半侧：标签页、数据源、样式、词典
 ├── test/                 # node:test + tsx
-├── example/mcp.html      # 样式试验台（设计稿，不参与发布）
 └── scripts/              # 客户端打包与测试脚本
 ```
 
@@ -324,11 +323,10 @@ pnpm --filter dsh-loulan-mcp build    # Host tsc + 客户端类型检查 + esbui
 - 发布：`pnpm release`（`pnpm login` + `build` + `publish`）。
 - ⚠️ **删除某个 `src/` 模块后，先清理 `lib/`**：`tsc` 不会删除输出目录里的旧产物，残留模块会被一起发布。构建前 `rm -rf lib` 最省心。
 
-### 样式与设计稿
+### 样式
 
 - 样式以模板字符串内联在 `src/client/styles.ts`，由 `ensureMcpStyles()` 一次性注入 `<style data-plugin="dsh-loulan-mcp">`（等价于 harness 的样式注入机制，只是不引入 CSS Modules 管线）。
 - 类名统一带 `dsh-mcp-` 前缀；颜色一律走语义 token（`--dsw-alias-*`、`--dsw-specific-tip`），因此自动跟随明暗主题。
-- `example/mcp.html` 是**可交互设计稿**：与实现共用同一套类名，可切换工具条方案、服务行方案、主题、状态与容器宽度。改版式时先在这里定稿，再回写 `styles.ts` / `McpView.tsx`。
 
 ## 10. 设计记录
 

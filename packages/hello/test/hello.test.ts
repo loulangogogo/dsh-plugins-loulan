@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
-import { apply, name } from '../src/index.js'
+import { apply } from '../src/index.js'
 
 /** 命令注册表里被登记的一条命令（测试用最小结构）。 */
 interface RegisteredCommand {
@@ -38,6 +38,5 @@ test('apply 注册 hello 命令，handler 返回「你好」', () => {
   assert.equal(registered.length, 1)
   const command = registered[0]!
   assert.equal(command.name, 'hello')
-  assert.equal(command.name, name)
   assert.deepEqual(command.handler(), { kind: 'success', text: '你好' })
 })

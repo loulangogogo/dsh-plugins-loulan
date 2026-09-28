@@ -65,7 +65,7 @@ test('首次 pre-step 把规则注入到 claimed 消息之后', async () => {
     if (decision.kind !== 'enter') return
     assert.equal(decision.messages.length, 2)
     assert.equal(decision.messages[0], prompt)
-    assert.deepEqual(decision.messages[1]?.source, { kind: 'plugin', plugin: name, form: 'instructions' })
+    assert.deepEqual(decision.messages[1]?.source, { kind: name, form: 'instructions' })
     assert.ok(textOf(decision.messages[1]!).includes('提交前必须跑测试'))
   } finally {
     rmSync(project, { recursive: true, force: true })
@@ -82,7 +82,7 @@ test('可见历史已有规则消息时不重复注入', async () => {
     const handler = mount({ dshHome: home })
 
     const prompt = createUserMessage({ content: [{ type: 'text', text: '继续' }], source: { kind: 'user' } })
-    const existing = createUserMessage({ content: [{ type: 'text', text: '旧规则' }], source: { kind: 'plugin', plugin: name, form: 'instructions' } })
+    const existing = createUserMessage({ content: [{ type: 'text', text: '旧规则' }], source: { kind: name, form: 'instructions' } })
     const decision = await handler(
       payload(stubAgent(project, [existing]), [prompt], 2),
       async () => ({ kind: 'enter', messages: [prompt] }),

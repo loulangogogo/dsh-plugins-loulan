@@ -186,7 +186,7 @@ Rules from: .dsh/rules/Team.md
 配置项均可省略；插件不导出 schemastery schema，直接使用上面的默认值。在 profile 的 `cordis.patch.yml` 中覆盖：
 
 ```yaml
-- id: rules
+- id: dsh-loulan-rules
   name: dsh-loulan-rules
   config:
     dshHome: /path/to/.dsh
@@ -213,7 +213,7 @@ Rules from: .dsh/rules/Team.md
              持久 user/message → 随历史进入每次请求
 ```
 
-**去重**：插件的规则消息来源为 `{ kind: 'plugin', plugin: 'rules', form: 'instructions' }`。注入前扫描已领取消息与会话可见历史，只要存在本插件的规则消息就跳过，因此恢复会话、插件热重载都不会重复。
+**去重**：插件的规则消息来源为 `{ kind: 'dsh-loulan-rules', form: 'instructions' }`（`kind` 取插件名，与 `src/index.ts` 中声明的 `MessageSourceMap` 一致）。注入前扫描已领取消息与会话可见历史，只要存在本插件的规则消息就跳过，因此恢复会话、插件热重载都不会重复。
 
 **读取方式**：直接用 `node:fs` 读取文件，**不使用 `ctx.fs` 文件系统提供方**，因此不经过 DSH 的文件沙箱策略——规则目录应视为可信输入。
 
@@ -259,9 +259,9 @@ Rules from: .dsh/rules/Team.md
 
 根因是同一份 `@deepseek-ai/*` 出现了两个实例：仓库根 `node_modules/@deepseek-ai/*` 是 `pnpm link:dsh` 建的 harness 软链，而 `packages/rules/node_modules/@deepseek-ai/*` 是 pnpm 为 `peerDependencies` 自动装入的 registry 副本。品牌类型（如 `MessageId`）在两份声明间不兼容，于是 TypeScript 报出 `UserMessage | UserMessage` 之类的错误。
 
-处理：删掉 `packages/rules/node_modules`，再跑一次 `pnpm link:dsh`，让解析回落到 harness 软链。
+处理：删掉残留的 `packages/rules/node_modules`，再跑一次 `pnpm link:dsh`，让解析回落到 harness 软链。
 
-> DSH 生成的 profile 配置是 `nodeLinker: hoisted` + `autoInstallPeers: false`，peer 不会被自动安装，所以真实 profile 安装不会出现这个重复；问题只在开发仓库（`autoInstallPeers` 默认 `true`）。想从根上消除，可在仓库根 `pnpm-workspace.yaml` 加 `autoInstallPeers: false`。
+> 仓库根 `pnpm-workspace.yaml` 已经设置 `autoInstallPeers: false`，pnpm 不再为 `peerDependencies` 实装 registry 副本，因此正常安装不会再出现这个重复；只有更早的安装残留（或手动绕过该设置）才需要按上面的步骤清理。DSH 生成的 profile 配置也是 `nodeLinker: hoisted` + `autoInstallPeers: false`，真实 profile 安装同样不会出现此问题。
 
 ### 规则会不会被压缩掉
 
@@ -281,7 +281,7 @@ packages/rules/
 ├── test/               # node:test 单元测试（经 harness 自带 tsx 运行）
 ├── scripts/
 │   └── test-unit.sh    # 测试入口
-├── cordis.patch.yml    # 打包分发用的挂载 patch（id: rules）
+├── cordis.patch.yml    # 打包分发用的挂载 patch（id: dsh-loulan-rules）
 └── tsconfig.build.json # 构建到 lib/
 ```
 

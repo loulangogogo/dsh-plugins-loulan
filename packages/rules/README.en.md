@@ -186,7 +186,7 @@ Omitted files are listed at the start of the message as "（已省略超出预�
 All fields are optional; the plugin exports no schemastery schema and simply uses the defaults above. Override them in the profile's `cordis.patch.yml`:
 
 ```yaml
-- id: rules
+- id: dsh-loulan-rules
   name: dsh-loulan-rules
   config:
     dshHome: /path/to/.dsh
@@ -213,7 +213,7 @@ All fields are optional; the plugin exports no schemastery schema and simply use
              persistent user/message → rides along in every request
 ```
 
-**Dedup**: the plugin's rules message has the source `{ kind: 'plugin', plugin: 'rules', form: 'instructions' }`. Before injecting, it scans the claimed messages and the session's visible history; if this plugin's rules message exists, it is skipped, so resuming a session or hot-reloading the plugin never duplicates it.
+**Dedup**: the plugin's rules message has the source `{ kind: 'dsh-loulan-rules', form: 'instructions' }` (the `kind` is the plugin name, matching the `MessageSourceMap` declared in `src/index.ts`). Before injecting, it scans the claimed messages and the session's visible history; if this plugin's rules message exists, it is skipped, so resuming a session or hot-reloading the plugin never duplicates it.
 
 **Reading**: it reads files with `node:fs` directly and **does not use the `ctx.fs` provider**, so it does not go through DSH's file-sandbox policy — treat the rules directory as trusted input.
 
@@ -259,9 +259,9 @@ No. Each folds its content into the request batch in its own `agent/pre-step`; t
 
 The root cause is two instances of the same `@deepseek-ai/*` package: the repo-root `node_modules/@deepseek-ai/*` are harness symlinks created by `pnpm link:dsh`, while `packages/rules/node_modules/@deepseek-ai/*` are registry copies that pnpm installed automatically for `peerDependencies`. Branded types (such as `MessageId`) are incompatible between the two declarations, so TypeScript reports `UserMessage | UserMessage` and similar errors.
 
-Fix: delete `packages/rules/node_modules` and run `pnpm link:dsh` again, so resolution falls back to the harness symlinks.
+Fix: delete the leftover `packages/rules/node_modules` and run `pnpm link:dsh` again, so resolution falls back to the harness symlinks.
 
-> DSH-generated profiles use `nodeLinker: hoisted` + `autoInstallPeers: false`, so peers are never auto-installed and a real profile install does not hit this duplication; it only affects the development repository (`autoInstallPeers` defaults to `true`). To remove the cause entirely, add `autoInstallPeers: false` to the repo-root `pnpm-workspace.yaml`.
+> The repo-root `pnpm-workspace.yaml` already sets `autoInstallPeers: false`, so pnpm no longer installs registry copies for `peerDependencies` and a normal install no longer produces this duplication; only leftovers from an earlier install (or manually bypassing that setting) need the steps above. DSH-generated profiles also use `nodeLinker: hoisted` + `autoInstallPeers: false`, so a real profile install does not hit this either.
 
 ### Will the rules be compacted away
 
@@ -281,7 +281,7 @@ packages/rules/
 ├── test/               # node:test unit tests (run through the harness's bundled tsx)
 ├── scripts/
 │   └── test-unit.sh    # test entry point
-├── cordis.patch.yml    # mount patch for packaged distribution (id: rules)
+├── cordis.patch.yml    # mount patch for packaged distribution (id: dsh-loulan-rules)
 └── tsconfig.build.json # build to lib/
 ```
 

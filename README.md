@@ -29,8 +29,8 @@ dsh-plugins-loulan/
 │   ├── dsh.env             # 统一环境配置：DSH_HARNESS（默认 ~/.dsh/deepseek-harness）
 │   ├── link-dsh.sh         # 软链 harness 的 @deepseek-ai/* 包
 │   ├── dev.sh              # 以本 overlay 启动 DSH Web UI（端口 13080）
-│   ├── test-mcp.sh         # 只加载 mcp 插件启动 Web UI（端口 13080，先 build）
-│   └── test-rules.sh       # 只加载 rules 插件启动 Web UI（端口 13081，先 build）
+│   ├── test-mcp.sh         # 只加载 mcp 插件启动 Web UI（端口 13081，先 build）
+│   └── test-rules.sh       # 只加载 rules 插件启动 Web UI（端口 13082，先 build）
 └── packages/
     ├── mcp/                # 插件 1：dsh-loulan-mcp
     ├── hello/              # 插件 2：dsh-plugin-hello
@@ -69,14 +69,14 @@ DSH_HARNESS=~/.dsh/deepseek-harness pnpm link:dsh
 | 命令 | 作用 |
 |---|---|
 | `pnpm dev` | 以根 `cordis.yml` 启动 Web UI，三个插件都用源码入口，端口 **13080** |
-| `pnpm test-mcp` | 先 build `dsh-loulan-mcp`，再以 `packages/mcp/cordis.patch.yml` 单独启动 Web UI（端口 13080） |
-| `pnpm test-rules` | 先 build `dsh-loulan-rules`，再以 `packages/rules/cordis.patch.yml` 单独启动 Web UI（端口 13081） |
+| `pnpm test-mcp` | 先 build `dsh-loulan-mcp`，再以 `packages/mcp/cordis.patch.yml` 单独启动 Web UI（端口 13081） |
+| `pnpm test-rules` | 先 build `dsh-loulan-rules`，再以 `packages/rules/cordis.patch.yml` 单独启动 Web UI（端口 13082） |
 | `pnpm typecheck` | 用根 `tsconfig.json` 做全仓库类型检查（不含各包浏览器半侧） |
 
 > ⚠️ `test-mcp` / `test-rules` 名字像单元测试，**实际是「先构建、再启动 Web UI」**；
 > 真正的单元测试在各包内，用 `pnpm --filter <包名> test`。
 
-启动后打开 <http://127.0.0.1:13080>（`pnpm test-rules` 是 13081）。`pnpm dev` 等价于：
+启动后打开 <http://127.0.0.1:13080>（`pnpm test-mcp` 是 13081，`pnpm test-rules` 是 13082）。`pnpm dev` 等价于：
 
 ```sh
 cd ~/.dsh/deepseek-harness
@@ -176,7 +176,7 @@ pnpm --filter dsh-loulan-mcp release  # 登录并发布到 npm
 - `inject: ['commands']` 声明对命令注册表服务的依赖。
 
 ```yaml
-- id: hello
+- id: dsh-plugin-hello
   name: /绝对/路径/packages/hello/src/index.ts
 ```
 
@@ -213,7 +213,7 @@ pnpm --filter dsh-plugin-hello release  # 登录并发布到 npm
 默认上限 256 KiB、总预算 64 KiB，超出的文件会被整份省略并在消息中注明。
 
 ```yaml
-- id: rules
+- id: dsh-loulan-rules
   name: /绝对/路径/packages/rules/src/index.ts
   config:
     dshHome: /path/to/.dsh   # 缺省 $DSH_HOME 或 ~/.dsh

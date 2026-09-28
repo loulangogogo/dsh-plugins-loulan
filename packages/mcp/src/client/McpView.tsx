@@ -6,7 +6,7 @@ import type { ChangeEvent } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import { Button, IconTrashOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconTrashOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { McpMountGroup, McpTransport, UnloadableMountGroup } from '../contract.js'
 import type { McpSnapshot, MountControlResult } from './mcp-source.js'
 import { toolsText } from './mcp-source.js'
@@ -122,7 +122,7 @@ function UnloadButton({ label, title, description, confirmLabel, cancelLabel, di
         aria-label={label}
         onClick={() => { setOpen(true) }}
       >
-        <IconTrashOutline16 size={15} />
+        <IconTrashOutlineRegular size={15} />
       </button>
       <Modal
         open={open}

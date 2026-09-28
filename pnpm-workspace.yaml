@@ -2,3 +2,11 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
+# 本仓库的 @deepseek-ai/* 不是 npm registry 依赖，而是由 scripts/link-dsh.sh 软链到
+# DSH harness checkout（默认 ~/.dsh/deepseek-harness）。pnpm 默认 autoInstallPeers=true
+# 会把 packages/* 声明的 @deepseek-ai/* peer 从 registry 实装到
+# packages/*/node_modules/@deepseek-ai/，遮蔽根目录的 harness 软链，使同名包在编译期
+# 出现两份声明（cordis Context、session SessionId 的 BRAND 符号不同）而构建失败。
+# 故关闭该行为：harness 链接由 pnpm install 之后的 pnpm link:dsh 提供。
+# 注意：autoInstallPeers 是 pnpm 专属设置，pnpm 11 只从本文件读取，写在 .npmrc 无效。
+autoInstallPeers: false
