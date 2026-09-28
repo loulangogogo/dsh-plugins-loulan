@@ -21,6 +21,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "bash scripts/test-unit.sh",
     "prepack": "pnpm run build",
+    "hello-pack": "pnpm pack",
     "release": "pnpm login && pnpm build && pnpm publish --no-git-checks"
   },
   "dsh": {
