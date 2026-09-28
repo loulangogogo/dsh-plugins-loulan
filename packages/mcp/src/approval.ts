@@ -121,6 +121,21 @@ export async function mountAndRecord(
 }
 
 /**
+ * 解析某会话应挂载的工作区 .mcp.json。
+ *
+ * 与全局 .dsh 根命中同一文件时视为全局共享（不重复挂载），无 cwd 时也不挂载。
+ *
+ * @param cwd - 会话工作区目录
+ * @param rootFile - 全局 .dsh 根的 .mcp.json 路径
+ * @returns 工作区 .mcp.json 绝对路径；无需挂载时为 undefined
+ */
+export function workspaceFileOf(cwd: string | undefined, rootFile: string | undefined): string | undefined {
+  if (cwd === undefined) return undefined
+  const file = findMcpJson(cwd)
+  return file === undefined || file === rootFile ? undefined : file
+}
+
+/**
  * 注册 agent/created 监听：探测工作区 .mcp.json，**一律登记**该会话并挂载命中项。
  *
  * 即使工作区没有 .mcp.json、此刻也没有任何全局服务，也必须留下会话记录：
@@ -140,8 +155,7 @@ export function registerAgentCreated(
     const cwd = agent.session.header.cwd
     // agent/created 是 serial 事件，监听器类型为 `undefined | Promise<undefined>`，故显式返回 undefined。
     if (cwd === undefined) return undefined
-    const file = findMcpJson(cwd)
-    const workFile = file === undefined || file === rootFile ? undefined : file
+    const workFile = workspaceFileOf(cwd, rootFile)
     if (workFile !== undefined) {
       console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
     }

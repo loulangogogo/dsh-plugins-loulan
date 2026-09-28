@@ -123,8 +123,12 @@ export interface MountsRuntime {
   /**
    * 刷新：全局增量重挂 + 本会话（工作区 + 手动）重挂。
    *
+   * 本会话在当前进程里没有存活 agent 时（历史会话、agent 已释放、插件重载后记录丢失），
+   * 与读取路径一致地降级为「只同步全局」，返回仅含全局分组的载荷；若该会话仍有存活
+   * agent，则先自愈补登记再按本会话重挂。
+   *
    * @param sessionId - 会话 id；缺失为 null
-   * @returns 成功时携带新载荷；空闲保护触发时为 409，参数不合法时为 400
+   * @returns 成功时携带新载荷；空闲保护触发时为 409，缺少会话标识为 400
    */
   refresh(sessionId: string | null): Promise<ActionResult>
   /**
@@ -184,6 +188,13 @@ export function createMountsRuntime(options: {
    * 缺省视为「没有会话在运行」。
    */
   listAgents?: () => readonly { readonly status: string }[]
+  /**
+   * 无记录时的自愈钩子：用该会话仍存活的 agent 现算并登记一条记录。
+   *
+   * 只在 sessions 里查不到该会话时调用；没有存活 agent 时**必须**返回 false，
+   * 由调用方降级为「只同步全局」。缺省视为无法自愈。
+   */
+  adopt?: (sessionId: string) => Promise<boolean>
   /** 挂载实现（默认 mountFile），测试可注入桩。 */
   mount?: (
     ctx: Context,
@@ -205,6 +216,23 @@ export function createMountsRuntime(options: {
 
   /** 是否有任何会话正在运行（刷新/添加的空闲保护）。 */
   const isBusy = (): boolean => listAgents().some(agent => agent.status === 'running')
+
+  /**
+   * 取会话记录：查不到时先尝试自愈（该会话仍有存活 agent 则补登记）。
+   *
+   * 记录只随 agent 存活而存在，历史会话、已释放的会话、以及插件重载后的会话都查不到；
+   * 这里把「能不能拿到记录」收敛成一处，避免各动作各自判断。
+   *
+   * @param sessionId - 会话 id；缺失或为空返回 undefined
+   * @returns 记录；既无记录又无存活 agent 时为 undefined
+   */
+  const recordFor = async (sessionId: string | null): Promise<SessionRecord | undefined> => {
+    if (sessionId === null || sessionId.length === 0) return undefined
+    const known = sessions.get(sessionId)
+    if (known !== undefined) return known
+    const adopted = await options.adopt?.(sessionId)
+    return adopted === true ? sessions.get(sessionId) : undefined
+  }
 
   /** 由三组明细组装载荷。 */
   const payloadOf = (record: SessionRecord): McpMountedData =>
@@ -376,8 +404,18 @@ export function createMountsRuntime(options: {
     isBusy,
     syncGlobal,
     refresh: async (sessionId) => {
-      const record = sessionId === null || sessionId.length === 0 ? undefined : sessions.get(sessionId)
-      if (record === undefined) return { ok: false, code: 400, message: '会话未加载 MCP 服务，无法刷新' }
+      // 缺少会话标识属于请求本身不合法（客户端未带上会话），保持 400，不降级掩盖。
+      if (sessionId === null || sessionId.length === 0) {
+        return { ok: false, code: 400, message: '会话未加载 MCP 服务，无法刷新' }
+      }
+      const record = await recordFor(sessionId)
+      if (record === undefined) {
+        // 本会话在当前进程里没有存活 agent（历史会话、agent 已释放、插件重载后记录丢失）：
+        // 与读路径一致地降级为「只有全局共享」，只同步全局配置，不报「会话未加载 MCP 服务」。
+        // syncGlobal 忙时自行静默跳过，故此处不给 409——否则在历史会话里点刷新会被拦住。
+        await syncGlobal()
+        return { ok: true, data: buildMountPayload(globalServers(), [], []) }
+      }
       if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再刷新' }
       // 走到这里必然不忙，故 syncGlobal 必定真正执行（同时复用其并发去重）。
       await syncGlobal()

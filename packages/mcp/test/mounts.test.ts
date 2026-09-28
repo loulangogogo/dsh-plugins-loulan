@@ -163,13 +163,83 @@ test('runtime 存在运行中会话时 409 且不动 fiber', async () => {
   assert.equal(fibers.length, 0)
 })
 
-test('runtime refresh 对缺失/未跟踪会话返回 400', async () => {
+test('runtime refresh 缺少 sessionId 返回 400', async () => {
   const { ctx } = fakeCtx()
   const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
-  for (const sessionId of [null, '', 'nope']) {
+  for (const sessionId of [null, '']) {
     const result = await runtime.refresh(sessionId)
     assert.equal(result.ok, false)
     if (!result.ok) assert.equal(result.code, 400)
+  }
+})
+
+test('runtime refresh 对未登记会话降级为只同步全局，不再报「未加载」', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    // adopt 返回 false 模拟「该会话在当前进程里没有存活 agent」（历史会话）。
+    const runtime = createMountsRuntime({
+      ctx,
+      resolveGlobalFile: () => file,
+      adopt: () => Promise.resolve(false),
+    })
+
+    const result = await runtime.refresh('history-only')
+    assert.equal(result.ok, true)
+    if (!result.ok) return
+    // 只带全局分组：全局按磁盘现状同步，本会话两组为空，与读路径同一套降级。
+    assert.deepEqual(result.data.global.servers.map(s => s.name), ['a'])
+    assert.deepEqual(result.data.workspace.servers, [])
+    assert.deepEqual(result.data.manual.servers, [])
+    assert.deepEqual(result.data, runtime.read('history-only'))
+    assert.deepEqual(fibers.map(f => f.config.serverName), ['a'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runtime 忙时未登记会话刷新仍降级成功，不与读路径相左', async () => {
+  const agents = [{ status: 'running' }]
+  const { ctx, fibers } = fakeCtx()
+  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined, listAgents: () => agents })
+
+  const result = await runtime.refresh('history-only')
+  assert.equal(result.ok, true)
+  assert.equal(fibers.length, 0)
+})
+
+test('runtime refresh 对未登记但仍有存活 agent 的会话自愈并重挂本会话', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { w: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    let adopted = 0
+    const runtime = createMountsRuntime({
+      ctx,
+      resolveGlobalFile: () => undefined,
+      adopt: (sessionId) => {
+        adopted += 1
+        if (sessionId !== 's1') return Promise.resolve(false)
+        // 模拟插件侧自愈：用存活 agent 现算并登记记录，工作区文件由本轮刷新真正挂载。
+        runtime.track(fakeAgent(ctx, 's1', dir), file, [])
+        return Promise.resolve(true)
+      },
+    })
+
+    const result = await runtime.refresh('s1')
+    assert.equal(result.ok, true)
+    if (!result.ok) return
+    assert.deepEqual(fibers.map(f => f.config.serverName), [`w_${agentToken('s1')}`])
+    assert.deepEqual(result.data.workspace.servers.map(s => s.name), ['w'])
+
+    // 记录已建立：再次刷新不再走自愈。
+    assert.equal((await runtime.refresh('s1')).ok, true)
+    assert.equal(adopted, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

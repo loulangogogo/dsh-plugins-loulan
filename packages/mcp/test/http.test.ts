@@ -1,10 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import type { Context } from '@deepseek-ai/cordis'
 import {
   ADD_ROUTE_PATH, MAX_UPLOAD_BYTES, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH, UNLOAD_ROUTE_PATH,
 } from '../src/contract.js'
 import { createMountsHandler } from '../src/http.js'
 import type { McpMountedData } from '../src/contract.js'
+import { createMountsRuntime } from '../src/mounts.js'
 import type { ActionResult, MountsRuntime } from '../src/mounts.js'
 
 /** 全局分组桩。 */
@@ -125,6 +127,35 @@ test('GET /mounts 未跟踪会话或缺少 sessionId 时只返回全局分组', 
     await tick()
     assert.deepEqual(JSON.parse(res.body), globalOnly)
   }
+})
+
+test('POST /refresh 未登记会话（真实运行时）返回 200 全局载荷而非 400', async () => {
+  // 端到端串起 HTTP 分派与真实运行时：历史会话点刷新必须成功，与 GET 的降级一致。
+  const runtime = createMountsRuntime({
+    // 降级路径只用全局句柄表，不触碰 ctx；缺省无全局文件即为「只有全局共享」。
+    ctx: {} as unknown as Context,
+    resolveGlobalFile: () => undefined,
+  })
+  const res = fakeRes()
+  createMountsHandler(runtime)(
+    fakeReq({ method: 'POST', url: REFRESH_ROUTE_PATH, body: JSON.stringify({ sessionId: 'history-only' }) }) as never,
+    res as never,
+  )
+  await tick()
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(JSON.parse(res.body), { global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] } })
+})
+
+test('POST /refresh 缺少 sessionId（真实运行时）仍 400', async () => {
+  const runtime = createMountsRuntime({
+    ctx: {} as unknown as Context,
+    resolveGlobalFile: () => undefined,
+  })
+  const res = fakeRes()
+  createMountsHandler(runtime)(fakeReq({ method: 'POST', url: REFRESH_ROUTE_PATH, body: '{}' }) as never, res as never)
+  await tick()
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(JSON.parse(res.body), { error: '会话未加载 MCP 服务，无法刷新' })
 })
 
 test('POST /refresh 成功返回新载荷并带上 sessionId', async () => {
