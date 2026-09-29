@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-hello",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "注册 /hello 斜杠命令，在聊天界面输出「你好」",
   "main": "lib/index.js",
@@ -31,6 +31,6 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-commands": "^0.1.7-rc.2"
+    "@deepseek-ai/dsh-commands": "^0.1.7-rc.2 || ^0.2.0-rc.1"
   }
 }
