@@ -313,6 +313,64 @@ const CSS = `
   line-height: 20px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* 加载状态提示（未激活/挂载中）：说明为什么本会话的工作区分组是空的 */
+.dsh-mcp-state {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* 未挂载的服务：保留在所属分组内，展示原始服务名与原因 */
+.dsh-mcp-skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-specific-tip);
+}
+
+.dsh-mcp-skipped-heading {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-caption);
+}
+
+.dsh-mcp-skipped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.dsh-mcp-skipped-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dsh-mcp-skipped-name {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+  overflow-wrap: anywhere;
+}
+
+.dsh-mcp-skipped-reason {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
 `
 
 /**

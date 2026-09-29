@@ -9,18 +9,17 @@
  *   原「首个对话回合审批询问后挂载」已停用，见 approval.ts 中的注释。
  */
 import type { Context } from '@deepseek-ai/cordis'
-// Agent 类型 + dsh-agent 的事件类型声明（agent/created、agent/disposed）随本导入一起生效，
-// 确保 ctx.on 的类型推断可用。
-import type { Agent } from '@deepseek-ai/dsh-agent'
+// 仅引入 dsh-agent 的事件类型声明（agent/created、agent/disposed），确保 ctx.on 类型推断。
+import type {} from '@deepseek-ai/dsh-agent'
 // 类型副作用：把 ctx.webServer 声明合并到 Context 上（供下方 ctx.inject(['webServer']) 使用）。
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { name, Config } from './config.js'
 import { findMcpJson, dshHome } from './discover.js'
 import { mountFile } from './mount.js'
-import { ROUTE_PREFIX } from './contract.js'
+import { ROUTE_PREFIX, type McpSkippedEntry } from './contract.js'
 import { createMountsRuntime } from './mounts.js'
 import { createMountsHandler } from './http.js'
-import { mountAndRecord, registerAgentCreated, registerAgentDisposed, workspaceFileOf } from './approval.js'
+import { registerAgentCreated, registerAgentDisposed } from './approval.js'
 
 export { name, Config }
 
@@ -38,40 +37,35 @@ export const inject = ['tools']
  * @param config - 插件配置（cwd 指定 .dsh 根目录）
  */
 export async function apply(ctx: Context, config: Config) {
-  // 0. 空闲保护需要枚举存活 agent，刷新自愈需要按 id 取存活 agent；`agents` 是**可选**
-  //    依赖：本插件未在 inject 中声明它，直接读 ctx.agents 会被 cordis 拒绝，
-  //    故经 ctx.inject 拿到服务后缓存取值函数。
+  // 0. 空闲保护需要枚举存活 agent；`agents` 是**可选**依赖：本插件未在 inject 中声明它，
+  //    直接读 ctx.agents 会被 cordis 拒绝，故经 ctx.inject 拿到服务后缓存取值函数。
   let listAgents: () => readonly { readonly status: string }[] = () => []
-  let agentById: (sessionId: string) => Agent | undefined = () => undefined
   ctx.inject(['agents'], (scope) => {
     listAgents = () => scope.agents.list()
-    // 会话 id 来自 HTTP 请求，是无品牌的普通字符串，这里按 agent.id 的品牌类型取其同一身份；
-    // 查不到即返回 undefined，错误 id 不会造成任何副作用。
-    agentById = (sessionId) => scope.agents.get(sessionId as Agent['id'])
-    scope.effect(() => () => {
-      listAgents = () => []
-      agentById = () => undefined
-    }, 'dsh-loulan-mcp: agents probe')
+    scope.effect(() => () => { listAgents = () => [] }, 'dsh-loulan-mcp: agents probe')
   })
 
   // 1. 同步阶段：确定全局根、建运行时，并**先**订阅生命周期与端点。
   //    全局挂载会 await MCP 子进程启动（stdio 服务握手，可能数秒）；若放在订阅之前，
   //    这段时间内创建的 agent 会漏掉 agent/created 而永不登记（其刷新/添加随即报错）。
   const rootStart = config.cwd || dshHome()
-  const rootFile = findMcpJson(rootStart)
   const runtime = createMountsRuntime({
     ctx,
     resolveGlobalFile: () => findMcpJson(rootStart),
     listAgents,
-    // 记录查不到时（历史上未登记、或插件重载后丢失）用仍然存活的 agent 现算记录；
-    // 没有存活 agent 时返回 false，由运行时降级为「只同步全局」。
-    adopt: async (sessionId) => {
-      const agent = agentById(sessionId)
-      if (agent === undefined) return false
-      await mountAndRecord(agent, workspaceFileOf(agent.session.header.cwd, rootFile), runtime)
-      return true
+    activate: async (sessionId) => {
+      // 会话控制器是**可选**服务（只有提供它的 profile 才有）；用 ctx.get 按名读取，
+      // 既不需要 inject 声明，也不会在服务缺失时抛错（返回 undefined）。
+      // resolveAgent 内部对并发恢复做了去重，故这里可以安全地并发调用。
+      const controller = ctx.get('sessionController') as
+        | { resolveAgent(id: string): Promise<{ error?: unknown }> }
+        | undefined
+      if (controller === undefined) return false
+      const result = await controller.resolveAgent(sessionId)
+      return result.error === undefined
     },
   })
+  const rootFile = findMcpJson(rootStart)
   registerAgentCreated(ctx, rootFile, runtime)
   registerAgentDisposed(ctx, runtime)
 
@@ -89,8 +83,9 @@ export async function apply(ctx: Context, config: Config) {
   })
 
   // 3. 最后才挂全局 .dsh 根 .mcp.json：载荷读取时现算，全局晚挂上不影响已登记的会话。
-  const handles = rootFile ? await mountFile(ctx, rootFile) : []
-  runtime.seedGlobal(handles)
+  const globalSkipped: McpSkippedEntry[] = []
+  const handles = rootFile ? await mountFile(ctx, rootFile, undefined, undefined, globalSkipped) : []
+  runtime.seedGlobal(handles, globalSkipped)
 
   // 【已停用】首个对话回合的审批询问（工作区 .mcp.json 现为自动挂载，不再询问）。
   // 如需恢复「询问后挂载」模式：取消下行注释，并在上方 import 中补回 registerAgentRequest，

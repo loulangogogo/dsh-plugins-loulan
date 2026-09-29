@@ -48,5 +48,26 @@ test('buildMountPayload 三组皆空时返回空组', () => {
     global: { servers: [] },
     workspace: { servers: [] },
     manual: { servers: [] },
+    state: 'loaded',
+  })
+})
+
+test('buildMountPayload 带出加载状态与各来源未挂载原因', () => {
+  const data = buildMountPayload([], [], [], {
+    state: 'mounting',
+    globalSkipped: [{ name: 'g', reason: '没有 command/url' }],
+    workSkipped: [{ name: 'Machine - API 文档', reason: 'serverName 不合法' }],
+  })
+  assert.equal(data.state, 'mounting')
+  assert.deepEqual(data.global.skipped, [{ name: 'g', reason: '没有 command/url' }])
+  assert.deepEqual(data.workspace.skipped, [{ name: 'Machine - API 文档', reason: 'serverName 不合法' }])
+  // 没有跳过项的来源不输出 skipped 字段。
+  assert.equal('skipped' in data.manual, false)
+})
+
+test('toMountGroup 无跳过项时不输出 skipped 字段', () => {
+  assert.deepEqual(toMountGroup([srv()], []), {
+    file: '/proj/.mcp.json',
+    servers: [{ name: 'memory', transport: 'stdio', tools: ['a', 'b'] }],
   })
 })

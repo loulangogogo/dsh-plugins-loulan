@@ -163,6 +163,106 @@ test('runtime 存在运行中会话时 409 且不动 fiber', async () => {
   assert.equal(fibers.length, 0)
 })
 
+test('runtime read 区分未激活与正在挂载', () => {
+  const { ctx } = fakeCtx()
+  const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+
+  assert.equal(runtime.read('s1').state, 'inactive')
+  assert.equal(runtime.read(null).state, 'inactive')
+  runtime.setMounting('s1', true)
+  assert.equal(runtime.read('s1').state, 'mounting')
+  runtime.setMounting('s1', false)
+  assert.equal(runtime.read('s1').state, 'inactive')
+
+  // 已登记优先：挂载中的标记不会把 loaded 覆盖成 mounting。
+  runtime.track(fakeAgent(ctx), undefined, [])
+  runtime.setMounting('s1', true)
+  assert.equal(runtime.read('s1').state, 'loaded')
+})
+
+test('runtime 把未挂载成功的服务与原因带进载荷', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({
+      mcpServers: {
+        ok: { command: 'x' },
+        'bad name 中文': { command: 'y' },
+        neither: {},
+        boom: { command: 'z' },
+      },
+    }))
+    const { ctx } = fakeCtx({ fail: new Set([`boom_${agentToken('s1')}`]) })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+    runtime.track(fakeAgent(ctx, 's1', dir), file, [])
+
+    const result = await runtime.refresh('s1')
+    assert.equal(result.ok, true)
+    if (!result.ok) return
+    assert.deepEqual(result.data.workspace.servers.map(s => s.name), ['ok'])
+    const reasons = new Map((result.data.workspace.skipped ?? []).map(item => [item.name, item.reason]))
+    assert.deepEqual([...reasons.keys()].sort(), ['bad name 中文', 'boom', 'neither'])
+    assert.match(reasons.get('bad name 中文') ?? '', /serverName 不合法/)
+    assert.match(reasons.get('neither') ?? '', /既没有 command/)
+    assert.match(reasons.get('boom') ?? '', /启动失败/)
+
+    // 手动添加走同一条收集路径。
+    const added = await runtime.addUpload('s1', 'extra.json', '{"mcpServers":{"也无空格 ":{"command":"x"}}}')
+    assert.equal(added.ok, true)
+    if (!added.ok) return
+    assert.deepEqual(added.data.manual.skipped?.map(item => item.name), ['也无空格 '])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runtime refresh 对未登记会话先激活，登记落地后返回完整载荷', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    writeFileSync(file, JSON.stringify({ mcpServers: { w: { command: 'x' } } }))
+    const { ctx, fibers } = fakeCtx()
+    let activated = 0
+    const runtime = createMountsRuntime({
+      ctx,
+      resolveGlobalFile: () => undefined,
+      activateWaitMs: 2_000,
+      // 模拟 agent/created：激活后异步挂载并登记（刷新只等结果，不自行挂载）。
+      activate: (sessionId) => {
+        activated += 1
+        setTimeout(() => { runtime.track(fakeAgent(ctx, sessionId, dir), file, []) }, 5)
+        return Promise.resolve(true)
+      },
+    })
+
+    const result = await runtime.refresh('history')
+    assert.equal(activated, 1)
+    assert.equal(result.ok, true)
+    if (!result.ok) return
+    assert.equal(result.data.state, 'loaded')
+    assert.equal(fibers.length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runtime refresh 激活后超时未登记则降级，且绝不自行挂载', async () => {
+  const { ctx, fibers } = fakeCtx()
+  const runtime = createMountsRuntime({
+    ctx,
+    resolveGlobalFile: () => undefined,
+    activate: () => Promise.resolve(true),
+    activateWaitMs: 10,
+  })
+
+  const result = await runtime.refresh('history')
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.data.state, 'inactive')
+  // 关键回归：刷新不得替未登记会话补挂载（否则与飞行中的挂载撞出同名实例）。
+  assert.equal(fibers.length, 0)
+})
+
 test('runtime refresh 缺少 sessionId 返回 400', async () => {
   const { ctx } = fakeCtx()
   const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
@@ -179,12 +279,8 @@ test('runtime refresh 对未登记会话降级为只同步全局，不再报「�
     const file = join(dir, '.mcp.json')
     writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'x' } } }))
     const { ctx, fibers } = fakeCtx()
-    // adopt 返回 false 模拟「该会话在当前进程里没有存活 agent」（历史会话）。
-    const runtime = createMountsRuntime({
-      ctx,
-      resolveGlobalFile: () => file,
-      adopt: () => Promise.resolve(false),
-    })
+    // 不登记任何会话（历史会话在当前进程里没有存活 agent）。
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => file })
 
     const result = await runtime.refresh('history-only')
     assert.equal(result.ok, true)
@@ -210,34 +306,20 @@ test('runtime 忙时未登记会话刷新仍降级成功，不与读路径相左
   assert.equal(fibers.length, 0)
 })
 
-test('runtime refresh 对未登记但仍有存活 agent 的会话自愈并重挂本会话', async () => {
+test('runtime 同一会话并发刷新只挂载一次，避免同名 serverName 冲突', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-'))
   try {
     const file = join(dir, '.mcp.json')
     writeFileSync(file, JSON.stringify({ mcpServers: { w: { command: 'x' } } }))
     const { ctx, fibers } = fakeCtx()
-    let adopted = 0
-    const runtime = createMountsRuntime({
-      ctx,
-      resolveGlobalFile: () => undefined,
-      adopt: (sessionId) => {
-        adopted += 1
-        if (sessionId !== 's1') return Promise.resolve(false)
-        // 模拟插件侧自愈：用存活 agent 现算并登记记录，工作区文件由本轮刷新真正挂载。
-        runtime.track(fakeAgent(ctx, 's1', dir), file, [])
-        return Promise.resolve(true)
-      },
-    })
+    const runtime = createMountsRuntime({ ctx, resolveGlobalFile: () => undefined })
+    runtime.track(fakeAgent(ctx, 's1', dir), file, [])
 
-    const result = await runtime.refresh('s1')
-    assert.equal(result.ok, true)
-    if (!result.ok) return
+    // 两个标签页同时点刷新：重复挂载会被 mcp-client 以「serverName 已占用」拒绝。
+    const [first, second] = await Promise.all([runtime.refresh('s1'), runtime.refresh('s1')])
+    assert.equal(first.ok, true)
+    assert.deepEqual(second, first)
     assert.deepEqual(fibers.map(f => f.config.serverName), [`w_${agentToken('s1')}`])
-    assert.deepEqual(result.data.workspace.servers.map(s => s.name), ['w'])
-
-    // 记录已建立：再次刷新不再走自愈。
-    assert.equal((await runtime.refresh('s1')).ok, true)
-    assert.equal(adopted, 1)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

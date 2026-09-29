@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import { findMcpJson } from './discover.js'
 import { agentToken } from './server-name.js'
 import { mountFile, type MountedHandle } from './mount.js'
+import type { McpSkippedEntry } from './contract.js'
 import type { MountsRuntime } from './mounts.js'
 
 /** 单个 agent 的挂载决定状态。 */
@@ -104,6 +105,7 @@ export async function askForApproval(
  * 挂载工作区 .mcp.json 并写入运行时记录。
  *
  * 全程静默：不向会话日志追加事件、不产生通知卡片；运行时记录供 HTTP 端点读取。
+ * 挂载期间在运行时标记「正在挂载」，让标签页能把这段时间与「该会话未激活」区分开。
  *
  * @param agent - 目标 agent
  * @param file - 工作区 .mcp.json 绝对路径；无则为 undefined
@@ -114,25 +116,22 @@ export async function mountAndRecord(
   agent: Agent,
   file: string | undefined,
   runtime: MountsRuntime,
-  mount: (ctx: Context, file: string, suffix?: string) => Promise<MountedHandle[]> = mountFile,
+  mount: (
+    ctx: Context,
+    file: string,
+    suffix?: string,
+    exclude?: ReadonlySet<string>,
+    skipped?: McpSkippedEntry[],
+  ) => Promise<MountedHandle[]> = mountFile,
 ): Promise<void> {
-  const handles = file === undefined ? [] : await mount(agent.ctx, file, agentToken(agent.id))
-  runtime.track(agent, file, handles)
-}
-
-/**
- * 解析某会话应挂载的工作区 .mcp.json。
- *
- * 与全局 .dsh 根命中同一文件时视为全局共享（不重复挂载），无 cwd 时也不挂载。
- *
- * @param cwd - 会话工作区目录
- * @param rootFile - 全局 .dsh 根的 .mcp.json 路径
- * @returns 工作区 .mcp.json 绝对路径；无需挂载时为 undefined
- */
-export function workspaceFileOf(cwd: string | undefined, rootFile: string | undefined): string | undefined {
-  if (cwd === undefined) return undefined
-  const file = findMcpJson(cwd)
-  return file === undefined || file === rootFile ? undefined : file
+  runtime.setMounting(agent.id, true)
+  try {
+    const skipped: McpSkippedEntry[] = []
+    const handles = file === undefined ? [] : await mount(agent.ctx, file, agentToken(agent.id), undefined, skipped)
+    runtime.track(agent, file, handles, skipped)
+  } finally {
+    runtime.setMounting(agent.id, false)
+  }
 }
 
 /**
@@ -155,7 +154,8 @@ export function registerAgentCreated(
     const cwd = agent.session.header.cwd
     // agent/created 是 serial 事件，监听器类型为 `undefined | Promise<undefined>`，故显式返回 undefined。
     if (cwd === undefined) return undefined
-    const workFile = workspaceFileOf(cwd, rootFile)
+    const file = findMcpJson(cwd)
+    const workFile = file === undefined || file === rootFile ? undefined : file
     if (workFile !== undefined) {
       console.log(`[dsh-loulan-mcp] 工作区 ${cwd} 发现 .mcp.json，自动挂载`)
     }

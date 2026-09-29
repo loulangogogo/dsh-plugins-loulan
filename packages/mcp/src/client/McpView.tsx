@@ -7,7 +7,7 @@ import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/clie
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import { Button, IconTrashOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { McpMountGroup, McpTransport, UnloadableMountGroup } from '../contract.js'
+import type { McpMountedData, McpMountGroup, McpTransport, UnloadableMountGroup } from '../contract.js'
 import type { McpSnapshot, MountControlResult } from './mcp-source.js'
 import { toolsText } from './mcp-source.js'
 import { NS } from './locales.js'
@@ -54,6 +54,8 @@ interface GroupLabels {
   expand: string
   /** 收起。 */
   collapse: string
+  /** 未挂载服务的分组标题。 */
+  skipped: string
   /** 卸载入口的无障碍名与 tooltip。 */
   unload: string
   /** 确认弹框标题。 */
@@ -216,12 +218,15 @@ function ToolsRow({ tools, labels }: { tools: readonly string[]; labels: GroupLa
 /**
  * 渲染一个来源分组。
  *
+ * 有未挂载的服务时同样渲染该分组（并列出原因）：否则「配置存在但一个都没起来」
+ * 与「本会话没有这份配置」在界面上完全一样。
+ *
  * @param title - 分组标题（已本地化）
  * @param group - 分组数据
  * @param labels - 分组内文案
  * @param pending - 是否有控制动作在进行（进行中禁用卸载）
  * @param unload - 卸载说明与回调；缺省表示该分组不可卸载（全局共享）
- * @returns 分组节点；空组返回 null
+ * @returns 分组节点；既无服务又无未挂载项时返回 null
  */
 function renderGroup(
   title: string,
@@ -230,7 +235,8 @@ function renderGroup(
   pending: boolean,
   unload?: { description: string; run: () => void },
 ) {
-  if (group.servers.length === 0) return null
+  const skipped = group.skipped ?? []
+  if (group.servers.length === 0 && skipped.length === 0) return null
   return (
     <section className="dsh-mcp-group">
       <div className="dsh-mcp-group-head">
@@ -258,19 +264,38 @@ function renderGroup(
             />
           )}
       </div>
-      <ul className="dsh-mcp-list">
-        {group.servers.map(server => (
-          <li className="dsh-mcp-server" key={server.name}>
-            <div className="dsh-mcp-server-head">
-              <span className="dsh-mcp-server-name">{server.name}</span>
-              <span className={`dsh-mcp-transport ${TRANSPORT_CLASS[server.transport]}`}>
-                {server.transport}
-              </span>
-            </div>
-            <ToolsRow tools={server.tools} labels={labels} />
-          </li>
-        ))}
-      </ul>
+      {group.servers.length === 0
+        ? null
+        : (
+          <ul className="dsh-mcp-list">
+            {group.servers.map(server => (
+              <li className="dsh-mcp-server" key={server.name}>
+                <div className="dsh-mcp-server-head">
+                  <span className="dsh-mcp-server-name">{server.name}</span>
+                  <span className={`dsh-mcp-transport ${TRANSPORT_CLASS[server.transport]}`}>
+                    {server.transport}
+                  </span>
+                </div>
+                <ToolsRow tools={server.tools} labels={labels} />
+              </li>
+            ))}
+          </ul>
+        )}
+      {skipped.length === 0
+        ? null
+        : (
+          <div className="dsh-mcp-skipped">
+            <div className="dsh-mcp-skipped-heading">{labels.skipped}</div>
+            <ul className="dsh-mcp-skipped-list">
+              {skipped.map(item => (
+                <li className="dsh-mcp-skipped-item" key={item.name}>
+                  <span className="dsh-mcp-skipped-name">{item.name}</span>
+                  <span className="dsh-mcp-skipped-reason">{item.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
     </section>
   )
 }
@@ -325,19 +350,29 @@ export function McpView({ useMcp, t, refresh, addUpload, unload }: McpViewProps)
     run(t('error.addFailed'), () => file.text().then(content => addUpload({ name: file.name, content })))
   }
 
-  const data = snapshot ?? { global: EMPTY_GROUP, workspace: EMPTY_GROUP, manual: EMPTY_GROUP }
+  // 快照未取得时按空载荷占位；state 取 loaded，避免在拉取途中误报「未激活」。
+  const data: McpMountedData = snapshot
+    ?? { global: EMPTY_GROUP, workspace: EMPTY_GROUP, manual: EMPTY_GROUP, state: 'loaded' }
   const total = data.workspace.servers.length + data.manual.servers.length + data.global.servers.length
   const labels: GroupLabels = {
     toolsUnavailable: t('tools.unavailable'),
     toolsSeparator: t('tools.separator'),
     expand: t('tools.expand'),
     collapse: t('tools.collapse'),
+    skipped: t('group.skipped'),
     unload: t('group.unload'),
     unloadTitle: t('unload.title'),
     unloadConfirm: t('unload.confirm'),
     unloadCancel: t('unload.cancel'),
   }
   const unloadFailed = t('error.unloadFailed')
+  // 有未挂载原因时也要渲染分组，否则「配置存在但没起来」会退化成空态文案。
+  const skippedCount = (data.workspace.skipped?.length ?? 0)
+    + (data.manual.skipped?.length ?? 0)
+    + (data.global.skipped?.length ?? 0)
+  const stateHint = data.state === 'inactive'
+    ? t('state.inactive')
+    : data.state === 'mounting' ? t('state.mounting') : null
 
   return (
     <div className="dsh-mcp-root">
@@ -370,9 +405,11 @@ export function McpView({ useMcp, t, refresh, addUpload, unload }: McpViewProps)
           </label>
         </div>
       </div>
+      {stateHint === null ? null : <div className="dsh-mcp-state">{stateHint}</div>}
       {error === null ? null : <div className="dsh-mcp-error">{error}</div>}
-      {total === 0
-        ? <div className="dsh-mcp-empty">{t('empty')}</div>
+      {total === 0 && skippedCount === 0
+        // 有状态提示时不再叠通用空态文案：提示已经说清了为什么是空的。
+        ? (stateHint === null ? <div className="dsh-mcp-empty">{t('empty')}</div> : null)
         : (
           <>
             {renderGroup(

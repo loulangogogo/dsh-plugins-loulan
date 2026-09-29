@@ -2,15 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMountControl, normalizeMounts, toolsText } from '../src/client/mcp-source.js'
 
-/** 合法载荷桩（三组）。 */
+/** 合法载荷桩（三组 + 状态 + 未挂载原因）。 */
 const raw = {
   global: { servers: [] },
-  workspace: { file: '/proj/.mcp.json', servers: [{ name: 'memory', transport: 'stdio', tools: ['a'] }] },
+  workspace: {
+    file: '/proj/.mcp.json',
+    servers: [{ name: 'memory', transport: 'stdio', tools: ['a'] }],
+    skipped: [{ name: 'Machine - API 文档', reason: 'serverName 不合法' }],
+  },
   manual: { file: 'extra.json', servers: [{ name: 'extra', transport: 'streamable-http', tools: [] }] },
+  state: 'loaded',
 }
 
 /** 只带全局分组的载荷桩。 */
-const globalOnly = { global: { servers: [{ name: 'g', transport: 'stdio', tools: [] }] }, workspace: { servers: [] }, manual: { servers: [] } }
+const globalOnly = {
+  global: { servers: [{ name: 'g', transport: 'stdio', tools: [] }] },
+  workspace: { servers: [] },
+  manual: { servers: [] },
+  state: 'inactive',
+}
 
 /** 让本轮微任务跑完。 */
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -55,9 +65,20 @@ test('normalizeMounts 接受合法载荷', () => {
   assert.deepEqual(normalizeMounts(raw), raw)
 })
 
-test('normalizeMounts 缺 manual 时按空组兼容', () => {
+test('normalizeMounts 缺 manual 时按空组兼容，缺 state 时按 loaded 兜底', () => {
   const legacy = { global: { servers: [] }, workspace: { servers: [] } }
-  assert.deepEqual(normalizeMounts(legacy), { global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] } })
+  assert.deepEqual(normalizeMounts(legacy), {
+    global: { servers: [] },
+    workspace: { servers: [] },
+    manual: { servers: [] },
+    state: 'loaded',
+  })
+})
+
+test('normalizeMounts 保留 state 与未挂载原因，未知 state 归为 loaded', () => {
+  assert.equal(normalizeMounts({ ...globalOnly, state: 'mounting' })?.state, 'mounting')
+  assert.equal(normalizeMounts({ ...raw, state: 'wat' })?.state, 'loaded')
+  assert.deepEqual(normalizeMounts(raw)?.workspace.skipped, [{ name: 'Machine - API 文档', reason: 'serverName 不合法' }])
 })
 
 test('normalizeMounts 拒绝畸形载荷', () => {
@@ -65,6 +86,8 @@ test('normalizeMounts 拒绝畸形载荷', () => {
   assert.equal(normalizeMounts({}), null)
   assert.equal(normalizeMounts({ global: { servers: [] }, workspace: { servers: [{ name: 1 }] }, manual: { servers: [] } }), null)
   assert.equal(normalizeMounts({ global: { servers: [] }, workspace: { servers: [] }, manual: 'x' }), null)
+  // skipped 结构不合法时整份载荷视为畸形（视图显示空态）。
+  assert.equal(normalizeMounts({ ...raw, workspace: { servers: [], skipped: [{ name: 'x' }] } }), null)
 })
 
 test('数据源初次订阅拉取并发布', async () => {

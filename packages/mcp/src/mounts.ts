@@ -8,11 +8,17 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { dirname } from 'node:path'
-import { MAX_UPLOAD_BYTES, type McpMountedData, type McpMountGroup } from './contract.js'
+import { MAX_UPLOAD_BYTES, type McpLoadState, type McpMountedData, type McpMountGroup, type McpSkippedEntry } from './contract.js'
 import type { MountedHandle, MountedServer } from './mount.js'
 import { buildMountPayload, handlesToServers, mountFile, mountServers, settleMounts, toMountGroup } from './mount.js'
 import { parseMcpServersText, readMcpServers } from './parse.js'
 import { agentToken, mapServer } from './server-name.js'
+
+/** 激活历史会话后，等待其挂载登记落地的默认上限（毫秒）：MCP 子进程冷启动通常在这个量级内。 */
+const DEFAULT_ACTIVATE_WAIT_MS = 20_000
+
+/** 等待登记的轮询间隔（毫秒）。 */
+const RECORD_POLL_MS = 200
 
 /** 浏览器上传的 .mcp.json 内容（保留原始文本供刷新时重挂）。 */
 export interface UploadedFile {
@@ -76,8 +82,9 @@ export interface MountsRuntime {
    * 记录启动时已挂载的全局共享服务句柄。
    *
    * @param handles - mountFile 返回的全局句柄（已完成启动并含工具名）
+   * @param skipped - 全局来源未挂载成功的服务及原因
    */
-  seedGlobal(handles: MountedHandle[]): void
+  seedGlobal(handles: MountedHandle[], skipped?: readonly McpSkippedEntry[]): void
   /**
    * 读取当前全局共享分组。
    *
@@ -85,13 +92,24 @@ export interface MountsRuntime {
    */
   globalGroup(): McpMountGroup
   /**
+   * 标记/清除「该会话正在挂载」。
+   *
+   * 由 agent/created 的挂载流程调用：登记要等挂载结束才写入，此标记让读取路径能把
+   * 「正在挂载」与「该会话未激活」区分开。
+   *
+   * @param sessionId - 会话 id
+   * @param value - true 表示开始挂载，false 表示挂载已结束
+   */
+  setMounting(sessionId: string, value: boolean): void
+  /**
    * 记录某会话的工作区挂载句柄。
    *
    * @param agent - 该会话的 agent（刷新时需要其 ctx 与工作区目录）
    * @param workspaceFile - 该会话工作区 .mcp.json 路径；无则 undefined
    * @param handles - 工作区挂载句柄
+   * @param skipped - 工作区来源未挂载成功的服务及原因
    */
-  track(agent: Agent, workspaceFile: string | undefined, handles: MountedHandle[]): void
+  track(agent: Agent, workspaceFile: string | undefined, handles: MountedHandle[], skipped?: readonly McpSkippedEntry[]): void
   /**
    * 清除某会话的全部记录（agent 销毁时；agent.ctx 卸载会自行释放 fiber）。
    *
@@ -99,10 +117,10 @@ export interface MountsRuntime {
    */
   forget(sessionId: string): void
   /**
-   * 读取某会话的三组挂载载荷。
+   * 读取某会话的三组挂载载荷与加载状态。
    *
    * @param sessionId - 会话 id；缺失为 null
-   * @returns 三组载荷；未跟踪的会话只带全局分组
+   * @returns 三组载荷与 state；未跟踪的会话只带全局分组（state 为 inactive 或 mounting）
    */
   read(sessionId: string | null): McpMountedData
   /**
@@ -124,8 +142,9 @@ export interface MountsRuntime {
    * 刷新：全局增量重挂 + 本会话（工作区 + 手动）重挂。
    *
    * 本会话在当前进程里没有存活 agent 时（历史会话、agent 已释放、插件重载后记录丢失），
-   * 与读取路径一致地降级为「只同步全局」，返回仅含全局分组的载荷；若该会话仍有存活
-   * agent，则先自愈补登记再按本会话重挂。
+   * 先尝试经注入的 `activate` 激活该会话，再等其自行挂载登记（上限见 `activateWaitMs`）；
+   * 激活失败或超时则与读取路径一致地降级为「只同步全局」。同一会话的并发刷新复用同一次
+   * 执行，避免重挂出同名 mcp-client 实例。
    *
    * @param sessionId - 会话 id；缺失为 null
    * @returns 成功时携带新载荷；空闲保护触发时为 409，缺少会话标识为 400
@@ -163,10 +182,14 @@ interface SessionRecord {
   workspaceFile: string | undefined
   /** 当前工作区挂载句柄。 */
   workspaceHandles: MountedHandle[]
+  /** 工作区来源未挂载成功的服务及原因（展示用）。 */
+  workspaceSkipped: McpSkippedEntry[]
   /** 已上传的文件（保留内容供刷新重挂）。 */
   uploads: UploadedFile[]
   /** 当前手动挂载句柄。 */
   uploadHandles: MountedHandle[]
+  /** 手动来源未挂载成功的服务及原因（展示用）。 */
+  uploadSkipped: McpSkippedEntry[]
 }
 
 /**
@@ -189,18 +212,26 @@ export function createMountsRuntime(options: {
    */
   listAgents?: () => readonly { readonly status: string }[]
   /**
-   * 无记录时的自愈钩子：用该会话仍存活的 agent 现算并登记一条记录。
+   * 刷新时激活（解析或恢复）历史会话：返回是否已激活。
    *
-   * 只在 sessions 里查不到该会话时调用；没有存活 agent 时**必须**返回 false，
-   * 由调用方降级为「只同步全局」。缺省视为无法自愈。
+   * 由插件经 `ctx.get('sessionController')` 注入；缺省视为不具备该能力，
+   * 此时未登记会话的刷新只同步全局配置。
    */
-  adopt?: (sessionId: string) => Promise<boolean>
+  activate?: (sessionId: string) => Promise<boolean>
+  /**
+   * 激活后等待该会话登记落地的上限（毫秒）。
+   *
+   * agent/created 会自行挂载并登记，挂载含 MCP 子进程冷启动，故默认给足时间；
+   * 仅测试需要缩短。
+   */
+  activateWaitMs?: number
   /** 挂载实现（默认 mountFile），测试可注入桩。 */
   mount?: (
     ctx: Context,
     file: string,
     suffix?: string,
     exclude?: ReadonlySet<string>,
+    skipped?: McpSkippedEntry[],
   ) => Promise<MountedHandle[]>
 }): MountsRuntime {
   const mount = options.mount ?? mountFile
@@ -210,6 +241,17 @@ export function createMountsRuntime(options: {
   const globalHandles = new Map<string, MountedHandle>()
   /** 进行中的全局同步：并发调用复用同一 Promise，避免重复动同一批 fiber。 */
   let globalSync: Promise<void> | null = null
+  /**
+   * 进行中的本会话刷新：同一会话的并发刷新复用同一次。
+   *
+   * 刷新会「先释放再重挂」本会话的服务，同一会话并发执行会重挂出同名 mcp-client
+   * 实例（serverName 冲突）；页面多标签、重复点击都可触发，故按会话去重。
+   */
+  const sessionRefreshes = new Map<string, Promise<ActionResult>>()
+  /** 正在挂载的会话：read 用它把「挂载中」与「未激活」区分开。 */
+  const mounting = new Set<string>()
+  /** 当前全局来源未挂载成功的服务及原因（展示用）。 */
+  let globalSkipped: McpSkippedEntry[] = []
 
   /** 取当前全局服务明细。 */
   const globalServers = (): MountedServer[] => handlesToServers([...globalHandles.values()])
@@ -217,26 +259,18 @@ export function createMountsRuntime(options: {
   /** 是否有任何会话正在运行（刷新/添加的空闲保护）。 */
   const isBusy = (): boolean => listAgents().some(agent => agent.status === 'running')
 
-  /**
-   * 取会话记录：查不到时先尝试自愈（该会话仍有存活 agent 则补登记）。
-   *
-   * 记录只随 agent 存活而存在，历史会话、已释放的会话、以及插件重载后的会话都查不到；
-   * 这里把「能不能拿到记录」收敛成一处，避免各动作各自判断。
-   *
-   * @param sessionId - 会话 id；缺失或为空返回 undefined
-   * @returns 记录；既无记录又无存活 agent 时为 undefined
-   */
-  const recordFor = async (sessionId: string | null): Promise<SessionRecord | undefined> => {
-    if (sessionId === null || sessionId.length === 0) return undefined
-    const known = sessions.get(sessionId)
-    if (known !== undefined) return known
-    const adopted = await options.adopt?.(sessionId)
-    return adopted === true ? sessions.get(sessionId) : undefined
-  }
+  /** 只带全局分组的载荷（未登记/挂载中会话的降级形态）。 */
+  const globalOnlyPayload = (state: McpLoadState): McpMountedData =>
+    buildMountPayload(globalServers(), [], [], { state, globalSkipped })
 
   /** 由三组明细组装载荷。 */
   const payloadOf = (record: SessionRecord): McpMountedData =>
-    buildMountPayload(globalServers(), handlesToServers(record.workspaceHandles), handlesToServers(record.uploadHandles))
+    buildMountPayload(globalServers(), handlesToServers(record.workspaceHandles), handlesToServers(record.uploadHandles), {
+      state: 'loaded',
+      globalSkipped,
+      workSkipped: record.workspaceSkipped,
+      manualSkipped: record.uploadSkipped,
+    })
 
   /** 某会话工作区目录（手动挂载 stdio 的默认 cwd）。 */
   const projectDirOf = (record: SessionRecord): string => record.agent.session.header.cwd ?? process.cwd()
@@ -290,6 +324,7 @@ export function createMountsRuntime(options: {
       for (const handle of stale) {
         if (!failedDispose.has(handle.mounted.serverName)) globalHandles.delete(handle.mounted.serverName)
       }
+      globalSkipped = []
       return
     }
     let servers: Record<string, unknown>
@@ -303,10 +338,12 @@ export function createMountsRuntime(options: {
     // 先只映射（不挂载）算出各服务的新配置指纹，据此得出增量计划。
     const projectDir = dirname(file)
     const nextKeys = new Map<string, string>()
+    const skipped: McpSkippedEntry[] = []
     for (const [serverName, raw] of Object.entries(servers)) {
       const mapped = mapServer(serverName, raw, projectDir)
       if (!mapped.ok) {
         console.warn(`[dsh-loulan-mcp] ${mapped.reason}`)
+        skipped.push({ name: serverName, reason: mapped.reason })
         continue
       }
       nextKeys.set(mapped.config.serverName, JSON.stringify(mapped.config))
@@ -329,11 +366,13 @@ export function createMountsRuntime(options: {
     }
 
     const freshNames = [...plan.mount, ...plan.remount].filter(name => !failedDispose.has(name))
-    if (freshNames.length === 0) return
-    const subset: Record<string, unknown> = {}
-    for (const name of freshNames) subset[name] = servers[name]
-    const fresh = await settleMounts(options.ctx, mountServers(options.ctx, subset, file, projectDir))
-    for (const handle of fresh) globalHandles.set(handle.mounted.serverName, handle)
+    if (freshNames.length > 0) {
+      const subset: Record<string, unknown> = {}
+      for (const name of freshNames) subset[name] = servers[name]
+      const fresh = await settleMounts(options.ctx, mountServers(options.ctx, subset, file, projectDir), skipped)
+      for (const handle of fresh) globalHandles.set(handle.mounted.serverName, handle)
+    }
+    globalSkipped = skipped
   }
 
   /**
@@ -343,7 +382,11 @@ export function createMountsRuntime(options: {
    * @param exclude - 需跳过的挂载名集合（上一次 dispose 失败的名字）
    * @returns 新挂载的句柄
    */
-  const mountUploads = async (record: SessionRecord, exclude?: ReadonlySet<string>): Promise<MountedHandle[]> => {
+  const mountUploads = async (
+    record: SessionRecord,
+    exclude?: ReadonlySet<string>,
+    skipped: McpSkippedEntry[] = [],
+  ): Promise<MountedHandle[]> => {
     const projectDir = projectDirOf(record)
     const suffix = manualSuffix(record.agent.id)
     const handles: MountedHandle[] = []
@@ -351,7 +394,8 @@ export function createMountsRuntime(options: {
       const servers = parseMcpServersText(upload.content)
       handles.push(...await settleMounts(
         record.agent.ctx,
-        mountServers(record.agent.ctx, servers, upload.name, projectDir, suffix, exclude),
+        mountServers(record.agent.ctx, servers, upload.name, projectDir, suffix, exclude, skipped),
+        skipped,
       ))
     }
     return handles
@@ -366,11 +410,15 @@ export function createMountsRuntime(options: {
     const keptUploads = record.uploadHandles.filter(handle => failedDispose.has(handle.mounted.serverName))
     record.workspaceHandles = keptWork
     record.uploadHandles = keptUploads
+    const workSkipped: McpSkippedEntry[] = []
     if (record.workspaceFile !== undefined) {
-      const fresh = await mount(record.agent.ctx, record.workspaceFile, agentToken(record.agent.id), failedDispose)
+      const fresh = await mount(record.agent.ctx, record.workspaceFile, agentToken(record.agent.id), failedDispose, workSkipped)
       record.workspaceHandles = [...keptWork, ...fresh]
     }
-    record.uploadHandles = [...keptUploads, ...await mountUploads(record, failedDispose)]
+    record.workspaceSkipped = workSkipped
+    const uploadSkipped: McpSkippedEntry[] = []
+    record.uploadHandles = [...keptUploads, ...await mountUploads(record, failedDispose, uploadSkipped)]
+    record.uploadSkipped = uploadSkipped
   }
 
   /**
@@ -386,20 +434,88 @@ export function createMountsRuntime(options: {
     return globalSync
   }
 
+  /**
+   * 等待该会话登记落地。
+   *
+   * 激活历史会话后，挂载与登记由 agent/created 异步完成（含 MCP 子进程冷启动），
+   * 这里只观察登记结果，不参与挂载。
+   *
+   * @param sessionId - 会话 id
+   * @returns 记录；超过等待上限仍未登记时为 undefined
+   */
+  const waitForRecord = async (sessionId: string): Promise<SessionRecord | undefined> => {
+    const deadline = Date.now() + (options.activateWaitMs ?? DEFAULT_ACTIVATE_WAIT_MS)
+    for (;;) {
+      const record = sessions.get(sessionId)
+      if (record !== undefined) return record
+      if (Date.now() >= deadline) return undefined
+      await new Promise(resolve => setTimeout(resolve, RECORD_POLL_MS))
+    }
+  }
+
+  /**
+   * 单会话刷新：已登记的重新挂载；未登记的先激活会话，等其自行挂载登记。
+   *
+   * @param sessionId - 会话 id（非空）
+   * @returns 刷新结果
+   */
+  const runRefresh = async (sessionId: string): Promise<ActionResult> => {
+    const known = sessions.get(sessionId)
+    if (known !== undefined) {
+      if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再刷新' }
+      // 走到这里必然不忙，故 syncGlobal 必定真正执行（同时复用其并发去重）。
+      await syncGlobal()
+      await refreshSession(known)
+      return { ok: true, data: payloadOf(known) }
+    }
+    // 未登记：该会话在当前进程里没有存活 agent（历史会话、agent 已释放、插件重载后未激活）。
+    // 先尝试激活它；激活会触发 agent/created，挂载与登记由监听器完成，这里只等结果——
+    // 绝不自行补挂载，否则会与飞行中的挂载撞出同名 mcp-client 实例（serverName 已占用）。
+    let activated = false
+    try {
+      activated = await options.activate?.(sessionId) ?? false
+    } catch (error) {
+      console.warn(`[dsh-loulan-mcp] 激活会话 ${sessionId} 失败，本轮只同步全局配置:`, error)
+    }
+    const record = activated ? await waitForRecord(sessionId) : undefined
+    if (record !== undefined) {
+      await syncGlobal()
+      return { ok: true, data: payloadOf(record) }
+    }
+    // 激活失败、或在等待上限内仍未登记：与读路径一致地降级为「只有全局共享」，
+    // 不报「会话未加载 MCP 服务」。syncGlobal 忙时自行静默跳过，故此处不给 409。
+    await syncGlobal()
+    return { ok: true, data: globalOnlyPayload(mounting.has(sessionId) ? 'mounting' : 'inactive') }
+  }
+
   return {
-    seedGlobal: (handles) => {
+    seedGlobal: (handles, skipped = []) => {
       for (const handle of handles) globalHandles.set(handle.mounted.serverName, handle)
+      globalSkipped = [...skipped]
     },
-    globalGroup: () => toMountGroup(globalServers()),
-    track: (agent, workspaceFile, handles) => {
-      sessions.set(agent.id, { agent, workspaceFile, workspaceHandles: handles, uploads: [], uploadHandles: [] })
+    globalGroup: () => toMountGroup(globalServers(), globalSkipped),
+    setMounting: (sessionId, value) => {
+      if (value) mounting.add(sessionId)
+      else mounting.delete(sessionId)
+    },
+    track: (agent, workspaceFile, handles, skipped = []) => {
+      sessions.set(agent.id, {
+        agent,
+        workspaceFile,
+        workspaceHandles: handles,
+        workspaceSkipped: [...skipped],
+        uploads: [],
+        uploadHandles: [],
+        uploadSkipped: [],
+      })
     },
     forget: (sessionId) => {
       sessions.delete(sessionId)
     },
     read: (sessionId) => {
       const record = sessionId === null ? undefined : sessions.get(sessionId)
-      return record === undefined ? buildMountPayload(globalServers(), [], []) : payloadOf(record)
+      if (record !== undefined) return payloadOf(record)
+      return globalOnlyPayload(sessionId !== null && mounting.has(sessionId) ? 'mounting' : 'inactive')
     },
     isBusy,
     syncGlobal,
@@ -408,19 +524,11 @@ export function createMountsRuntime(options: {
       if (sessionId === null || sessionId.length === 0) {
         return { ok: false, code: 400, message: '会话未加载 MCP 服务，无法刷新' }
       }
-      const record = await recordFor(sessionId)
-      if (record === undefined) {
-        // 本会话在当前进程里没有存活 agent（历史会话、agent 已释放、插件重载后记录丢失）：
-        // 与读路径一致地降级为「只有全局共享」，只同步全局配置，不报「会话未加载 MCP 服务」。
-        // syncGlobal 忙时自行静默跳过，故此处不给 409——否则在历史会话里点刷新会被拦住。
-        await syncGlobal()
-        return { ok: true, data: buildMountPayload(globalServers(), [], []) }
-      }
-      if (isBusy()) return { ok: false, code: 409, message: '有会话正在运行，请稍后再刷新' }
-      // 走到这里必然不忙，故 syncGlobal 必定真正执行（同时复用其并发去重）。
-      await syncGlobal()
-      await refreshSession(record)
-      return { ok: true, data: payloadOf(record) }
+      const pending = sessionRefreshes.get(sessionId)
+      if (pending !== undefined) return await pending
+      const task = runRefresh(sessionId).finally(() => { sessionRefreshes.delete(sessionId) })
+      sessionRefreshes.set(sessionId, task)
+      return await task
     },
     addUpload: async (sessionId, name, content) => {
       const record = sessionId === null || sessionId.length === 0 ? undefined : sessions.get(sessionId)
@@ -443,12 +551,17 @@ export function createMountsRuntime(options: {
       if (Object.keys(servers).length === 0) {
         return { ok: false, code: 400, message: '文件中没有 mcpServers' }
       }
+      const skipped: McpSkippedEntry[] = []
       const handles = await settleMounts(
         record.agent.ctx,
-        mountServers(record.agent.ctx, servers, name, projectDirOf(record), manualSuffix(record.agent.id)),
+        mountServers(record.agent.ctx, servers, name, projectDirOf(record), manualSuffix(record.agent.id), undefined, skipped),
+        skipped,
       )
       record.uploads.push({ name, content })
       record.uploadHandles.push(...handles)
+      // 只替换本次文件里出现的名字，避免后续添加把先前文件的未挂载原因挤掉。
+      const names = new Set(Object.keys(servers))
+      record.uploadSkipped = [...record.uploadSkipped.filter(item => !names.has(item.name)), ...skipped]
       return { ok: true, data: payloadOf(record) }
     },
     unload: async (sessionId, group) => {

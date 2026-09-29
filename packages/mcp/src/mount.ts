@@ -7,7 +7,7 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 // 副作用类型导入:把 ctx.tools 声明合并到 Context 上(工具注册表类型)。
 import type {} from '@deepseek-ai/dsh-tools'
 import { dirname } from 'node:path'
-import type { McpMountGroup, McpMountedData, McpServerEntry, McpTransport } from './contract.js'
+import type { McpLoadState, McpMountGroup, McpMountedData, McpServerEntry, McpSkippedEntry, McpTransport } from './contract.js'
 import { readMcpServers } from './parse.js'
 import { mapServer } from './server-name.js'
 
@@ -63,16 +63,21 @@ export interface MountedHandle {
  * 来源文件取组内首个条目的 file：同组条目必然来自同一个 .mcp.json。
  *
  * @param mounts - 同一来源下成功挂载的服务明细
+ * @param skipped - 同一来源下未挂载成功的服务及原因；空则不输出该字段
  * @returns 分组（空数组时不含 file）
  */
-export function toMountGroup(mounts: readonly MountedServer[]): McpMountGroup {
+export function toMountGroup(mounts: readonly MountedServer[], skipped: readonly McpSkippedEntry[] = []): McpMountGroup {
   const file = mounts[0]?.file
   const servers: McpServerEntry[] = mounts.map(mount => ({
     name: mount.rawName,
     transport: mount.transport,
     tools: mount.tools,
   }))
-  return { ...(file === undefined ? {} : { file }), servers }
+  return {
+    ...(file === undefined ? {} : { file }),
+    servers,
+    ...(skipped.length === 0 ? {} : { skipped: [...skipped] }),
+  }
 }
 
 /**
@@ -91,17 +96,29 @@ export function handlesToServers(handles: readonly MountedHandle[]): MountedServ
  * @param globalMounts - 全局 .dsh 根已挂载的服务明细
  * @param workMounts - 工作区已挂载的服务明细
  * @param manualMounts - 本会话手动添加的服务明细
+ * @param options - 加载状态与各来源未挂载成功的服务（缺省视为 loaded、无跳过项）
  * @returns 分全局、工作区、手动添加三组的载荷
  */
 export function buildMountPayload(
   globalMounts: readonly MountedServer[],
   workMounts: readonly MountedServer[],
   manualMounts: readonly MountedServer[],
+  options: {
+    /** 本会话加载状态；缺省 loaded。 */
+    state?: McpLoadState
+    /** 全局来源未挂载成功的服务。 */
+    globalSkipped?: readonly McpSkippedEntry[]
+    /** 工作区来源未挂载成功的服务。 */
+    workSkipped?: readonly McpSkippedEntry[]
+    /** 手动添加来源未挂载成功的服务。 */
+    manualSkipped?: readonly McpSkippedEntry[]
+  } = {},
 ): McpMountedData {
   return {
-    global: toMountGroup(globalMounts),
-    workspace: toMountGroup(workMounts),
-    manual: toMountGroup(manualMounts),
+    global: toMountGroup(globalMounts, options.globalSkipped),
+    workspace: toMountGroup(workMounts, options.workSkipped),
+    manual: toMountGroup(manualMounts, options.manualSkipped),
+    state: options.state ?? 'loaded',
   }
 }
 
@@ -130,6 +147,16 @@ function toolNamesForServer(ctx: Context, serverName: string): string[] {
 }
 
 /**
+ * 把任意抛出物转成可展示的一行文本。
+ *
+ * @param error - 捕获到的错误
+ * @returns Error 取其 message，其它情况取 String()
+ */
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
  * 把一组 mcpServers 映射并挂载到指定 ctx,立即返回挂载句柄（不等启动完成）。
  *
  * 单个 server 映射或挂载失败不阻断其它 server，也不进入返回结果。
@@ -141,6 +168,7 @@ function toolNamesForServer(ctx: Context, serverName: string): string[] {
  * @param projectDir - stdio 子进程默认 cwd（.mcp.json 所在目录或会话工作区目录）
  * @param uniqueSuffix - 按 agent 派生唯一后缀,透传给 mapServer
  * @param exclude - 需跳过的挂载名集合（上一次 dispose 失败的 serverName，跳过以避免同名冲突）
+ * @param skipped - 收集器：逐条追加映射被拒或挂载抛错的服务及原因（供标签页展示）
  * @returns 成功挂载的句柄数组（tools 暂为空）
  */
 export function mountServers(
@@ -150,6 +178,7 @@ export function mountServers(
   projectDir: string,
   uniqueSuffix?: string,
   exclude?: ReadonlySet<string>,
+  skipped: McpSkippedEntry[] = [],
 ): MountedHandle[] {
   console.log(`[dsh-loulan-mcp] 应用 ${source}`)
   const handles: MountedHandle[] = []
@@ -157,10 +186,13 @@ export function mountServers(
     const mapped = mapServer(serverName, raw, projectDir, uniqueSuffix)
     if (!mapped.ok) {
       console.warn(`[dsh-loulan-mcp] ${mapped.reason}`)
+      skipped.push({ name: serverName, reason: mapped.reason })
       continue
     }
     if (exclude?.has(mapped.config.serverName)) {
-      console.warn(`[dsh-loulan-mcp] "${mapped.config.serverName}" 上一次释放失败，本轮跳过挂载`)
+      const reason = '上一次释放失败，本轮跳过挂载'
+      console.warn(`[dsh-loulan-mcp] "${mapped.config.serverName}" ${reason}`)
+      skipped.push({ name: serverName, reason })
       continue
     }
     try {
@@ -180,6 +212,7 @@ export function mountServers(
       console.log(`[dsh-loulan-mcp] 已挂载 MCP server "${mapped.config.serverName}"`)
     } catch (error) {
       console.error(`[dsh-loulan-mcp] 挂载 "${mapped.config.serverName}" 失败:`, error)
+      skipped.push({ name: serverName, reason: `挂载失败：${errorText(error)}` })
     }
   }
   return handles
@@ -194,14 +227,20 @@ export function mountServers(
  *
  * @param ctx - 挂载目标（用于枚举 ctx.tools 中的工具名）
  * @param handles - mountServers 返回的句柄数组
+ * @param skipped - 收集器：逐条追加启动失败的服务及原因（供标签页展示）
  * @returns 全部句柄数组（成功者 mounted.tools 已填充；失败者 failed 为 true）
  */
-export async function settleMounts(ctx: Context, handles: MountedHandle[]): Promise<MountedHandle[]> {
+export async function settleMounts(
+  ctx: Context,
+  handles: MountedHandle[],
+  skipped: McpSkippedEntry[] = [],
+): Promise<MountedHandle[]> {
   const settled = await Promise.allSettled(handles.map(handle => handle.fiber))
   return settled.map((item, index) => {
     const handle = handles[index]
     if (item.status === 'rejected') {
       console.error('[dsh-loulan-mcp] MCP server 启动失败:', item.reason)
+      skipped.push({ name: handle.mounted.rawName, reason: `启动失败：${errorText(item.reason)}` })
       return { ...handle, failed: true }
     }
     return {
@@ -221,6 +260,7 @@ export async function settleMounts(ctx: Context, handles: MountedHandle[]): Prom
  * @param file - .mcp.json 文件路径
  * @param uniqueSuffix - 按 agent 派生唯一后缀,透传给 mapServer
  * @param exclude - 需跳过的挂载名集合（上一次 dispose 失败的名字）
+ * @param skipped - 收集器：逐条追加未挂载成功的服务及原因（供标签页展示）
  * @returns 挂载句柄数组(含工具名与 failed 标记);读文件失败返回空数组
  */
 export async function mountFile(
@@ -228,13 +268,15 @@ export async function mountFile(
   file: string,
   uniqueSuffix?: string,
   exclude?: ReadonlySet<string>,
+  skipped: McpSkippedEntry[] = [],
 ): Promise<MountedHandle[]> {
   let servers: Record<string, unknown>
   try {
     servers = await readMcpServers(file)
   } catch (error) {
     console.error(`[dsh-loulan-mcp] 解析 ${file} 失败:`, error)
+    skipped.push({ name: file, reason: `读取/解析失败：${errorText(error)}` })
     return []
   }
-  return settleMounts(ctx, mountServers(ctx, servers, file, dirname(file), uniqueSuffix, exclude))
+  return settleMounts(ctx, mountServers(ctx, servers, file, dirname(file), uniqueSuffix, exclude, skipped), skipped)
 }

@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   ADD_ROUTE_PATH, MAX_UPLOAD_BYTES, MOUNTS_ROUTE_PATH, REFRESH_ROUTE_PATH, UNLOAD_ROUTE_PATH,
@@ -17,10 +20,16 @@ const work: McpMountedData = {
   global: globalGroup,
   workspace: { file: '/proj/.mcp.json', servers: [{ name: 'memory', transport: 'stdio', tools: ['a'] }] },
   manual: { file: 'extra.json', servers: [{ name: 'extra', transport: 'streamable-http', tools: [] }] },
+  state: 'loaded',
 }
 
 /** 未跟踪会话的载荷桩。 */
-const globalOnly: McpMountedData = { global: globalGroup, workspace: { servers: [] }, manual: { servers: [] } }
+const globalOnly: McpMountedData = {
+  global: globalGroup,
+  workspace: { servers: [] },
+  manual: { servers: [] },
+  state: 'inactive',
+}
 
 /**
  * 构造 runtime 桩：记录动作入参，动作结果可注入。
@@ -41,6 +50,7 @@ function fakeRuntime(
   const runtime: MountsRuntime = {
     seedGlobal: () => {},
     globalGroup: () => globalGroup,
+    setMounting: () => {},
     track: () => {},
     forget: () => {},
     read: (sessionId) => {
@@ -108,6 +118,17 @@ function fakeReq(options: {
 /** 让本轮微任务跑完（异步分派需要）。 */
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 
+/**
+ * 等待响应体写入。
+ *
+ * 真实运行时的动作会 await 同步/挂载，跨多个宏任务，单次 tick 不足以拿到响应。
+ *
+ * @param res - 响应桩
+ */
+async function waitBody(res: { body: string }): Promise<void> {
+  for (let i = 0; i < 100 && res.body === ''; i += 1) await tick()
+}
+
 test('GET /mounts 返回该会话 JSON 载荷并禁止缓存', async () => {
   const { runtime } = fakeRuntime()
   const res = fakeRes()
@@ -143,7 +164,53 @@ test('POST /refresh 未登记会话（真实运行时）返回 200 全局载荷�
   )
   await tick()
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(JSON.parse(res.body), { global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] } })
+  assert.deepEqual(JSON.parse(res.body), {
+    global: { servers: [] },
+    workspace: { servers: [] },
+    manual: { servers: [] },
+    state: 'inactive',
+  })
+})
+
+test('GET /mounts 在挂载中返回 state=mounting', async () => {
+  const runtime = createMountsRuntime({
+    ctx: {} as unknown as Context,
+    resolveGlobalFile: () => undefined,
+  })
+  runtime.setMounting('s1', true)
+  const res = fakeRes()
+  createMountsHandler(runtime)(fakeReq({ method: 'GET', url: `${MOUNTS_ROUTE_PATH}?sessionId=s1` }) as never, res as never)
+  await tick()
+  assert.equal(JSON.parse(res.body).state, 'mounting')
+})
+
+test('POST /refresh 把工作区里不合法服务的原因带到端点（真实运行时）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-http-'))
+  try {
+    const file = join(dir, '.mcp.json')
+    // 唯一条目名含空格与中文：不满足 mcp-client 的 serverName 约束，映射阶段即被拒。
+    writeFileSync(file, JSON.stringify({ mcpServers: { 'Machine - API 文档': { command: 'x' } } }))
+    const runtime = createMountsRuntime({
+      ctx: {} as unknown as Context,
+      resolveGlobalFile: () => undefined,
+    })
+    runtime.track({ id: 's1', ctx: {}, session: { header: { cwd: dir } } } as never, file, [])
+    const res = fakeRes()
+    createMountsHandler(runtime)(
+      fakeReq({ method: 'POST', url: REFRESH_ROUTE_PATH, body: JSON.stringify({ sessionId: 's1' }) }) as never,
+      res as never,
+    )
+    await waitBody(res)
+    assert.equal(res.statusCode, 200)
+    const body = JSON.parse(res.body)
+    assert.equal(body.state, 'loaded')
+    assert.deepEqual(body.workspace.servers, [])
+    assert.equal(body.workspace.skipped.length, 1)
+    assert.equal(body.workspace.skipped[0].name, 'Machine - API 文档')
+    assert.match(body.workspace.skipped[0].reason, /serverName 不合法/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('POST /refresh 缺少 sessionId（真实运行时）仍 400', async () => {

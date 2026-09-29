@@ -49,9 +49,10 @@ function fakeRuntime(over: Partial<MountsRuntime> = {}): MountsRuntime {
   return {
     seedGlobal: () => {},
     globalGroup: () => ({ servers: [] }),
+    setMounting: () => {},
     track: () => {},
     forget: () => {},
-    read: () => ({ global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] } }),
+    read: () => ({ global: { servers: [] }, workspace: { servers: [] }, manual: { servers: [] }, state: 'inactive' }),
     syncGlobal: async () => {},   // 新增：本文件不验证 GET 的同步顺序，空实现即可
     isBusy: () => false,
     refresh: async () => empty,

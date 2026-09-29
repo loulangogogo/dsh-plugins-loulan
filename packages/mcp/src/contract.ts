@@ -19,14 +19,33 @@ export interface McpServerEntry {
   tools: string[]
 }
 
+/** 未能挂载的服务（展示用）：没有挂载句柄，只有原因。 */
+export interface McpSkippedEntry {
+  /** .mcp.json 中的原始服务名（不含 agent 唯一后缀）。 */
+  name: string
+  /** 未挂载的原因：映射被拒（如 serverName 不合法）或 fiber 启动失败。 */
+  reason: string
+}
+
 /** 一个来源下的服务分组。 */
 export interface McpMountGroup {
   /** 来源 .mcp.json 绝对路径；该来源不存在时省略。 */
   file?: string
   servers: McpServerEntry[]
+  /** 本来源中未挂载成功的服务及其原因；没有则省略。 */
+  skipped?: McpSkippedEntry[]
 }
 
-/** 挂载清单载荷（三组来源）。 */
+/**
+ * 本会话在当前 Host 进程中的加载状态。
+ *
+ * - `loaded`：已在运行时登记（工作区/手动配置已挂载或已确认无需挂载）；
+ * - `mounting`：正在挂载（记录尚未写入，标签页可提示稍后再刷新）；
+ * - `inactive`：该会话在当前进程里没有存活 agent（历史会话、已释放、插件重载后未激活）。
+ */
+export type McpLoadState = 'loaded' | 'mounting' | 'inactive'
+
+/** 挂载清单载荷（三组来源 + 加载状态）。 */
 export interface McpMountedData {
   /** .dsh 根目录的全局共享服务。 */
   global: McpMountGroup
@@ -34,6 +53,8 @@ export interface McpMountedData {
   workspace: McpMountGroup
   /** 本会话经「添加」上传的手动挂载服务。 */
   manual: McpMountGroup
+  /** 本会话的加载状态（见 {@link McpLoadState}）。 */
+  state: McpLoadState
 }
 
 /** 本插件 HTTP 端点的公共前缀（Host 以 prefix 方式注册，客户端据此调用）。 */

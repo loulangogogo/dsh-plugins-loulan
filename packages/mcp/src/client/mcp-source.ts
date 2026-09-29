@@ -3,7 +3,7 @@
  */
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type {
-  McpMountedData, McpMountGroup, McpServerEntry, UnloadableMountGroup,
+  McpMountedData, McpMountGroup, McpServerEntry, McpSkippedEntry, UnloadableMountGroup,
 } from '../contract.js'
 
 /** 视图快照：端点返回的载荷；null 表示尚未取得。 */
@@ -79,6 +79,14 @@ function normalizeServer(raw: unknown): McpServerEntry | null {
   return { name, transport, tools: tools as string[] }
 }
 
+/** 校验并归一化一条未挂载成功的服务。 */
+function normalizeSkipped(raw: unknown): McpSkippedEntry | null {
+  if (!isRecord(raw)) return null
+  const { name, reason } = raw
+  if (typeof name !== 'string' || typeof reason !== 'string') return null
+  return { name, reason }
+}
+
 /** 校验并归一化一个分组。 */
 function normalizeGroup(raw: unknown): McpMountGroup | null {
   if (!isRecord(raw)) return null
@@ -89,14 +97,29 @@ function normalizeGroup(raw: unknown): McpMountGroup | null {
     if (server === null) return null
     servers.push(server)
   }
+  let skipped: McpSkippedEntry[] | undefined
+  if (raw.skipped !== undefined) {
+    if (!Array.isArray(raw.skipped)) return null
+    const list: McpSkippedEntry[] = []
+    for (const item of raw.skipped) {
+      const entry = normalizeSkipped(item)
+      if (entry === null) return null
+      list.push(entry)
+    }
+    if (list.length > 0) skipped = list
+  }
   const file = raw.file
-  return { ...(typeof file === 'string' ? { file } : {}), servers }
+  return {
+    ...(typeof file === 'string' ? { file } : {}),
+    servers,
+    ...(skipped === undefined ? {} : { skipped }),
+  }
 }
 
 /**
  * 防御式归一化端点响应。
  *
- * 为兼容尚未改版的旧载荷，缺失的 manual 分组按空组处理。
+ * 为兼容尚未改版的旧载荷，缺失的 manual 分组按空组处理，缺失或未知的 state 按 loaded 处理。
  *
  * @param raw - 未知响应体
  * @returns 合法载荷；畸形时返回 null（视图显示空态）
@@ -106,7 +129,9 @@ export function normalizeMounts(raw: unknown): McpSnapshot {
   const global = normalizeGroup(raw.global)
   const workspace = normalizeGroup(raw.workspace)
   const manual = raw.manual === undefined ? { servers: [] } : normalizeGroup(raw.manual)
-  return global === null || workspace === null || manual === null ? null : { global, workspace, manual }
+  if (global === null || workspace === null || manual === null) return null
+  const state = raw.state === 'inactive' || raw.state === 'mounting' ? raw.state : 'loaded'
+  return { global, workspace, manual, state }
 }
 
 /** 快照存储：当前值与订阅者集合（数据源与控制面共用一个实例）。 */
