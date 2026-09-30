@@ -5,8 +5,7 @@
  * - 端点：以 prefix 路由暴露读取（GET /mounts）、刷新（POST /refresh）、
  *   添加（POST /add）三个动作。
  * - agent 生命周期监听（创建时发现工作区 .mcp.json 即自动挂载、销毁时清理）
- *   封装在 approval.ts 的注册方法中，由 apply() 统一调用；
- *   原「首个对话回合审批询问后挂载」已停用，见 approval.ts 中的注释。
+ *   封装在 approval.ts 的注册方法中，由 apply() 统一调用。
  */
 import type { Context } from '@deepseek-ai/cordis'
 // 仅引入 dsh-agent 的事件类型声明（agent/created、agent/disposed），确保 ctx.on 类型推断。
@@ -87,8 +86,6 @@ export async function apply(ctx: Context, config: Config) {
   const handles = rootFile ? await mountFile(ctx, rootFile, undefined, undefined, globalSkipped) : []
   runtime.seedGlobal(handles, globalSkipped)
 
-  // 【已停用】首个对话回合的审批询问（工作区 .mcp.json 现为自动挂载，不再询问）。
-  // 如需恢复「询问后挂载」模式：取消下行注释，并在上方 import 中补回 registerAgentRequest，
-  // 同时按 approval.ts 中 registerAgentRequest 注释块的恢复步骤还原相关实现。
-  // registerAgentRequest(ctx)
+  // 工作区 .mcp.json 已在 agent 创建时自动挂载（见 approval.ts 的 registerAgentCreated），
+  // 不存在「首个对话回合审批询问后挂载」的流程。
 }

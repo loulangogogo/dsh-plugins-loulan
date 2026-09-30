@@ -35,7 +35,6 @@
 - [7. 约束与已知限制](#7-约束与已知限制)
 - [8. 常见问题](#8-常见问题)
 - [9. 开发与发布](#9-开发与发布)
-- [10. 设计记录](#10-设计记录)
 
 ---
 
@@ -296,6 +295,7 @@ curl -s http://127.0.0.1:13080/dsh-loulan-mcp/mounts
 packages/mcp/
 ├── src/
 │   ├── index.ts          # 插件入口：全局挂载 + 端点注册 + 生命周期监听
+│   ├── config.ts         # 插件配置：.dsh 根目录（全局 .mcp.json 的读取起点）
 │   ├── approval.ts       # agent/created 时发现并挂载工作区 .mcp.json
 │   ├── mounts.ts         # 进程内运行时：会话记录 + 刷新/添加/卸载 + 全局同步
 │   ├── mount.ts          # 映射并挂载 mcpServers、组装展示分组
@@ -327,10 +327,3 @@ pnpm --filter dsh-loulan-mcp build    # Host tsc + 客户端类型检查 + esbui
 
 - 样式以模板字符串内联在 `src/client/styles.ts`，由 `ensureMcpStyles()` 一次性注入 `<style data-plugin="dsh-loulan-mcp">`（等价于 harness 的样式注入机制，只是不引入 CSS Modules 管线）。
 - 类名统一带 `dsh-mcp-` 前缀；颜色一律走语义 token（`--dsw-alias-*`、`--dsw-specific-tip`），因此自动跟随明暗主题。
-
-## 10. 设计记录
-
-| 文档 | 内容 |
-|---|---|
-| [`docs/superpowers/specs/2026-09-17-dsh-loulan-mcp-mount-tab-design.md`](docs/superpowers/specs/2026-09-17-dsh-loulan-mcp-mount-tab-design.md) | 「MCP」标签页的完整设计：数据契约、数据通道变更（会话事件 → 内存注册表 + HTTP 端点）、打包约束，以及各次修订记录（§12 数据通道、§13 移除通知） |
-| [`docs/superpowers/plans/`](docs/superpowers/plans) | 实现计划（历史记录） |

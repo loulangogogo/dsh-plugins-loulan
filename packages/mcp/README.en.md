@@ -35,7 +35,6 @@ The whole pipeline **writes no session events and never enters the model context
 - [7. Constraints and known limitations](#7-constraints-and-known-limitations)
 - [8. FAQ](#8-faq)
 - [9. Development and release](#9-development-and-release)
-- [10. Design records](#10-design-records)
 
 ---
 
@@ -297,6 +296,7 @@ The `@deepseek-ai/dsh-mcp-client` version this plugin depends on must match the 
 packages/mcp/
 ├── src/
 │   ├── index.ts          # Plugin entry: global mounting + endpoint registration + lifecycle listeners
+│   ├── config.ts         # Plugin config: the .dsh root (start point for the global .mcp.json)
 │   ├── approval.ts       # Discovers and mounts the workspace .mcp.json on agent/created
 │   ├── mounts.ts         # In-process runtime: session records + refresh/add/unload + global sync
 │   ├── mount.ts          # Maps and mounts mcpServers, assembles the display groups
@@ -328,10 +328,3 @@ pnpm --filter dsh-loulan-mcp build    # Host tsc + client type check + esbuild c
 
 - Styles are inlined as template strings in `src/client/styles.ts`, injected once by `ensureMcpStyles()` as `<style data-plugin="dsh-loulan-mcp">` (equivalent to the harness's style-injection mechanism, just without pulling in the CSS Modules pipeline).
 - Class names all carry the `dsh-mcp-` prefix; colors always go through semantic tokens (`--dsw-alias-*`, `--dsw-specific-tip`), so they follow light/dark themes automatically.
-
-## 10. Design records
-
-| Document | Content |
-|---|---|
-| [`docs/superpowers/specs/2026-09-17-dsh-loulan-mcp-mount-tab-design.md`](docs/superpowers/specs/2026-09-17-dsh-loulan-mcp-mount-tab-design.md) | The complete design of the "MCP" tab: data contract, data-channel change (session events → in-memory registry + HTTP endpoints), bundling constraints, and the revision log (§12 data channel, §13 removing notifications) |
-| [`docs/superpowers/plans/`](docs/superpowers/plans) | Implementation plans (historical records) |
