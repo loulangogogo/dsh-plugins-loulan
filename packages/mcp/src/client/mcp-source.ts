@@ -180,9 +180,26 @@ function isIncomplete(data: McpMountedData): boolean {
 }
 
 /**
+ * 「正在挂载」时的重拉间隔（毫秒）。
+ *
+ * 服务端把挂载中的会话标为 mounting、挂载完成才写入记录，故这里按固定间隔重拉，
+ * 让停留在标签页上的用户自动看到结果，而不是停在那一次的瞬时快照上。
+ */
+const MOUNTING_POLL_MS = 2_000
+
+/**
+ * 「正在挂载」时的重拉次数上限（30 次 × 2 秒 ≈ 1 分钟）。
+ *
+ * 与服务端单次启动的硬上限（MCP SDK 的 60 秒握手超时）同量级；即使某个挂载彻底
+ * 卡死，也只是停止轮询（用户仍可手动刷新），不会永久发请求。
+ */
+const MOUNTING_POLL_LIMIT = 30
+
+/**
  * 创建一个按需拉取的快照源。
  *
- * 初次订阅时拉取一次并发布：拉取失败或呈中间态都不锁死，后续订阅
+ * 订阅时拉取一次并发布；结果仍为「正在挂载」时按固定间隔继续重拉，直到出现终态
+ * （loaded / inactive）或达到次数上限。拉取失败或呈中间态都不锁死，后续订阅
  * （如标签页切回）会再次拉取，避免会话永久停在缺工作区分组的空态。
  *
  * @param sessionId - 会话 id
@@ -195,30 +212,63 @@ function createLazySource(
   fetchMounts: (sessionId: string) => Promise<unknown>,
   store: SnapshotStore,
 ): ObservableSnapshot<McpSnapshot> {
-  let started = false
+  /** 是否有拉取在途：避免重复请求。 */
+  let inFlight = false
+  /** 当前订阅者数量：无人订阅时不再轮询。 */
+  let watching = 0
+  /** 已安排的轮询次数。 */
+  let polls = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  /** 停止轮询（幂等）。 */
+  const stopPolling = (): void => {
+    if (timer === undefined) return
+    clearTimeout(timer)
+    timer = undefined
+  }
+
+  /** 拉取一次并发布；服务端仍在挂载且还有订阅者时，安排下一次重拉。 */
+  const load = (): void => {
+    if (inFlight) return
+    inFlight = true
+    void fetchMounts(sessionId).then(
+      (payload) => {
+        inFlight = false
+        const normalized = normalizeMounts(payload)
+        // 畸形载荷不发布：下次订阅重新拉取。
+        if (normalized === null) return
+        store.publish(normalized)
+        if (normalized.state === 'mounting' && watching > 0 && polls < MOUNTING_POLL_LIMIT) {
+          polls += 1
+          // 触发前先清掉句柄，subscribe 才能据此判断「当前没有在途轮询」。
+          timer = setTimeout(() => {
+            timer = undefined
+            load()
+          }, MOUNTING_POLL_MS)
+        }
+      },
+      () => {
+        // 失败不锁死：下次订阅（如标签页切回）会重新拉取。
+        inFlight = false
+      },
+    )
+  }
+
   return {
     getSnapshot: store.source.getSnapshot,
     subscribe: (listener) => {
       const unsubscribe = store.source.subscribe(listener)
-      if (!started) {
-        started = true
-        void fetchMounts(sessionId).then(
-          (payload) => {
-            const normalized = normalizeMounts(payload)
-            if (normalized === null) {
-              started = false
-              return
-            }
-            store.publish(normalized)
-            if (isIncomplete(normalized)) started = false
-          },
-          () => {
-            // 失败不锁死：下次订阅（如标签页切回）会重新拉取。
-            started = false
-          },
-        )
+      watching += 1
+      const snapshot = store.source.getSnapshot()
+      // 重新订阅时该重拉的情形：还没有结果（首次订阅，或上次失败/载荷畸形）、
+      // 服务端仍在挂载、或载荷呈中间态（工作区与手动皆空却有全局服务）。
+      const retryable = snapshot === null || snapshot.state === 'mounting' || isIncomplete(snapshot)
+      if (timer === undefined && retryable) load()
+      return () => {
+        watching -= 1
+        if (watching === 0) stopPolling()
+        unsubscribe()
       }
-      return unsubscribe
     },
   }
 }

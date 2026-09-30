@@ -30,7 +30,7 @@ export const zh = {
   'group.global': '全局共享',
   'group.skipped': '未挂载',
   'state.inactive': '该会话当前未激活，工作区配置尚未加载。点「刷新」可尝试重新加载。',
-  'state.mounting': '本工作区的 MCP 服务正在挂载，稍后再点「刷新」查看结果。',
+  'state.mounting': '本工作区的 MCP 服务正在挂载…………。如果一直加载不出来再点「刷新」查看结果。',
   'group.unload': '卸载',
   'unload.title': '确认卸载',
   'unload.workspace': '将卸载「本工作区」的 MCP 服务。刷新后会重新读取 .mcp.json 并挂回。',

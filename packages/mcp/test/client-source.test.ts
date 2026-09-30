@@ -143,6 +143,119 @@ test('数据源工作区与手动皆空但全局非空时可重拉', async () =>
   assert.deepEqual(control.source.getSnapshot(), raw)
 })
 
+/** 「工作区正在挂载」载荷桩：三组皆空，正是用户实际遇到的那种形态。 */
+const mounting = {
+  global: { servers: [] },
+  workspace: { servers: [] },
+  manual: { servers: [] },
+  state: 'mounting',
+}
+
+/** 让本轮微任务与 setImmediate 队列跑完（不影响被 mock 的 setTimeout）。 */
+const flush = () => new Promise(resolve => setImmediate(resolve))
+
+test('数据源载荷为 mounting 时按 2 秒间隔重拉，直到 loaded 后停止', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let calls = 0
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      return calls < 3 ? mounting : raw
+    },
+  }).io)
+  control.source.subscribe(() => {})
+  await flush()
+  assert.equal(calls, 1)
+  assert.equal(control.source.getSnapshot()?.state, 'mounting')
+
+  // 未满一个间隔：不重拉。
+  t.mock.timers.tick(1000)
+  await flush()
+  assert.equal(calls, 1)
+
+  // 满 2 秒：重拉一次。
+  t.mock.timers.tick(1000)
+  await flush()
+  assert.equal(calls, 2)
+
+  t.mock.timers.tick(2000)
+  await flush()
+  assert.equal(calls, 3)
+  assert.deepEqual(control.source.getSnapshot(), raw)
+
+  // 已是终态：不再重拉。
+  t.mock.timers.tick(20_000)
+  await flush()
+  assert.equal(calls, 3)
+})
+
+test('数据源在无人订阅时停止轮询', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let calls = 0
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      return mounting
+    },
+  }).io)
+  const unsubscribe = control.source.subscribe(() => {})
+  await flush()
+  assert.equal(calls, 1)
+
+  unsubscribe()
+  t.mock.timers.tick(5000)
+  await flush()
+  assert.equal(calls, 1)
+})
+
+test('数据源停在 mounting 时重新订阅会立即再拉一次', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let calls = 0
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      return calls === 1 ? mounting : raw
+    },
+  }).io)
+  const unsubscribe = control.source.subscribe(() => {})
+  await flush()
+  assert.equal(calls, 1)
+
+  unsubscribe()
+  control.source.subscribe(() => {})
+  await flush()
+  assert.equal(calls, 2)
+  assert.deepEqual(control.source.getSnapshot(), raw)
+})
+
+test('数据源轮询上限为 30 次：首次 1 次 + 30 次后停止', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let calls = 0
+  const control = createMountControl('s1', fakeIo({
+    fetchMounts: async () => {
+      calls += 1
+      return mounting
+    },
+  }).io)
+  control.source.subscribe(() => {})
+  await flush()
+  assert.equal(calls, 1)
+
+  // 2 秒 × 30 次轮询后停：首次 1 次 + 轮询 30 次 = 31 次请求。
+  for (let i = 0; i < 40; i += 1) {
+    t.mock.timers.tick(2000)
+    await flush()
+  }
+  assert.equal(calls, 31)
+
+  // 上限之后不再有任何自动请求。
+  for (let i = 0; i < 5; i += 1) {
+    t.mock.timers.tick(2000)
+    await flush()
+  }
+  assert.equal(calls, 31)
+})
+
 test('refresh 成功用响应更新快照并通知订阅者', async () => {
   const updated = { ...raw, manual: { file: 'extra.json', servers: [{ name: 'extra2', transport: 'stdio', tools: [] }] } }
   let payload: unknown = raw
